@@ -20,6 +20,11 @@ class MossabChat {
         this.stopStreamBtn = document.getElementById('stopStreamBtn');
         this.mainInputArea = document.getElementById('mainInputArea');
 
+        // TODO elements
+        this.todoIndicator = document.getElementById('todoIndicator');
+        this.todoProgress = document.getElementById('todoProgress');
+        this.todoCurrentTask = document.getElementById('todoCurrentTask');
+
         this.init();
     }
 
@@ -62,6 +67,54 @@ class MossabChat {
 
         // Initial focus
         this.messageInput.focus();
+
+        // Start TODO polling
+        this.startTodoPolling();
+    }
+
+    /**
+     * TODO POLLING
+     * Fetch e aggiorna TODO ogni 2 secondi
+     */
+    startTodoPolling() {
+        // Initial fetch
+        this.fetchTodos();
+
+        // Poll every 2 seconds
+        setInterval(() => this.fetchTodos(), 2000);
+    }
+
+    async fetchTodos() {
+        try {
+            const response = await fetch('/api/todos');
+            const data = await response.json();
+
+            this.updateTodoUI(data);
+
+        } catch (error) {
+            console.error('Error fetching todos:', error);
+        }
+    }
+
+    updateTodoUI(data) {
+        if (!data.todos || data.todos.length === 0) {
+            this.todoIndicator.classList.add('hidden');
+            return;
+        }
+
+        // Show indicator
+        this.todoIndicator.classList.remove('hidden');
+
+        // Update progress
+        this.todoProgress.textContent = `${data.summary.completed}/${data.summary.total}`;
+
+        // Update current task
+        if (data.summary.current_task) {
+            this.todoCurrentTask.textContent = data.summary.current_task;
+            this.todoCurrentTask.style.display = 'block';
+        } else {
+            this.todoCurrentTask.style.display = 'none';
+        }
     }
 
     autoResize() {

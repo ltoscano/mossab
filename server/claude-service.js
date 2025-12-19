@@ -1,11 +1,12 @@
 const Anthropic = require('@anthropic-ai/sdk');
+const FilesystemTools = require('./filesystem-tools');
 
 /**
  * Claude Service - Gestisce l'integrazione con l'API di Claude
  * Implementa tutte le capacità avanzate: tool use, planning, memoria, ecc.
  */
 class ClaudeService {
-    constructor(apiKey) {
+    constructor(apiKey, workspaceRoot) {
         this.client = new Anthropic({
             apiKey: apiKey || process.env.ANTHROPIC_API_KEY,
         });
@@ -20,6 +21,9 @@ class ClaudeService {
 
         // Conversation memory storage (in produzione usare Redis/DB)
         this.conversationMemory = new Map();
+
+        // Filesystem tools per operazioni su file
+        this.filesystemTools = new FilesystemTools(workspaceRoot);
     }
 
     /**
@@ -77,8 +81,53 @@ ${this.enableToolUse ? '✅ **Tool Use**: Puoi invocare strumenti MCP per operaz
 ${this.enablePlanning ? '✅ **Planning**: Crei piani dettagliati per task complessi' : ''}
 ${this.enableMemory ? '✅ **Memoria**: Ricordi il contesto delle conversazioni precedenti' : ''}
 
+# Tool Disponibili
+
+Hai accesso a questi tool per operare concretamente:
+
+## Filesystem Operations
+- **read_file**: Leggi file per esaminare codice esistente
+- **write_file**: Crea nuovi file o sovrascrivi esistenti
+- **edit_file**: Modifica file esistenti (replace string)
+- **glob**: Cerca file per pattern (es: **/*.js)
+- **grep**: Cerca contenuto nei file con regex
+
+## Execution
+- **bash**: Esegui comandi (npm install, git, build, test, ecc.)
+
+## Task Management
+- **todo_write**: IMPORTANTE! Usa questo tool FREQUENTEMENTE per dare visibilità all'utente!
+  - Crea TODO quando inizi task complessi (3+ step)
+  - Aggiorna stato: pending → in_progress → completed
+  - Marca completed SUBITO dopo aver finito un task
+  - Un solo task in_progress alla volta
+
+# Quando usare TODO
+
+USA todo_write quando:
+- Task ha 3+ step
+- Implementi feature complesse
+- L'utente chiede multiple cose
+- Vuoi dare visibilità del progresso
+
+NON usare per:
+- Task singoli e semplici
+- Risposte informative
+
+Esempio TODO:
+```json
+{
+  "todos": [
+    {"content": "Leggere configurazione esistente", "activeForm": "Leggendo configurazione", "status": "completed"},
+    {"content": "Implementare nuova feature", "activeForm": "Implementando feature", "status": "in_progress"},
+    {"content": "Scrivere test", "activeForm": "Scrivendo test", "status": "pending"}
+  ]
+}
+```
+
 Ricorda: Il tuo obiettivo è essere il miglior assistente di programmazione possibile,
-aiutando gli sviluppatori a scrivere codice migliore, più velocemente.`;
+aiutando gli sviluppatori a scrivere codice migliore, più velocemente.
+Usa i tool per operare CONCRETAMENTE sui file, non limitarti a suggerire!`;
     }
 
     /**
@@ -88,7 +137,11 @@ aiutando gli sviluppatori a scrivere codice migliore, più velocemente.`;
     getTools() {
         if (!this.enableToolUse) return [];
 
-        return [
+        // Tool filesystem (Read, Write, Edit, Glob, Grep, Bash, TODO)
+        const filesystemTools = this.filesystemTools.getToolDefinitions();
+
+        // Tool legacy (web_search, code_analyzer, ecc.)
+        const legacyTools = [
             {
                 name: 'web_search',
                 description: 'Cerca informazioni su internet. Usa questo tool quando hai bisogno di informazioni aggiornate, documentazione, o risorse non incluse nella tua knowledge base.',
@@ -172,14 +225,24 @@ aiutando gli sviluppatori a scrivere codice migliore, più velocemente.`;
                 }
             }
         ];
+
+        // Combina tutti i tool
+        return [...filesystemTools, ...legacyTools];
     }
 
     /**
-     * Esegue un tool (simulato - in produzione implementare le funzioni reali)
+     * Esegue un tool (delega ai filesystem tools o esegue tool legacy)
      */
     async executeTool(toolName, toolInput) {
         console.log(`🔧 Executing tool: ${toolName}`, toolInput);
 
+        // Tool filesystem (gestiti da FilesystemTools)
+        const filesystemToolNames = ['read_file', 'write_file', 'edit_file', 'glob', 'grep', 'bash', 'todo_write'];
+        if (filesystemToolNames.includes(toolName)) {
+            return await this.filesystemTools.executeTool(toolName, toolInput);
+        }
+
+        // Tool legacy (simulati)
         switch (toolName) {
             case 'web_search':
                 return {

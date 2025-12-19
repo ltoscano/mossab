@@ -14,11 +14,15 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
+// Workspace root per filesystem operations
+const WORKSPACE_ROOT = path.join(__dirname, '..');
+
 // Inizializza Claude Service
 let claudeService;
 try {
-    claudeService = new ClaudeService(process.env.ANTHROPIC_API_KEY);
+    claudeService = new ClaudeService(process.env.ANTHROPIC_API_KEY, WORKSPACE_ROOT);
     console.log('✅ Claude Service initialized successfully');
+    console.log(`📁 Workspace: ${WORKSPACE_ROOT}`);
 } catch (error) {
     console.warn('⚠️ Claude Service initialization failed:', error.message);
     console.warn('📝 Mossab will run with limited capabilities');
@@ -448,6 +452,32 @@ app.get('/api/streaming/:sessionId/state', (req, res) => {
     const state = streamingManager.getSessionState(sessionId);
 
     res.json(state);
+});
+
+/**
+ * GET /api/todos
+ * Ottieni la lista TODO corrente
+ */
+app.get('/api/todos', (req, res) => {
+    if (!claudeService || !claudeService.filesystemTools) {
+        return res.json({ todos: [], message: 'TODO tracking not available' });
+    }
+
+    const todos = claudeService.filesystemTools.getTodos();
+
+    const inProgress = todos.find(t => t.status === 'in_progress');
+    const completed = todos.filter(t => t.status === 'completed').length;
+
+    res.json({
+        todos: todos,
+        summary: {
+            total: todos.length,
+            completed: completed,
+            pending: todos.filter(t => t.status === 'pending').length,
+            in_progress: inProgress ? 1 : 0,
+            current_task: inProgress?.activeForm || null
+        }
+    });
 });
 
 // Serve index.html per tutte le altre route

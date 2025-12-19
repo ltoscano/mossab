@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mossab - AI Developer</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Chat Window -->
+        <div class="chat-window">
+            <!-- Header -->
+            <div class="chat-header">
+                <div class="header-left">
+                    <div class="window-controls">
+                        <span class="control-btn minimize"></span>
+                        <span class="control-btn maximize"></span>
+                        <span class="control-btn close"></span>
+                    </div>
+                </div>
+                <div class="header-center">
+                    <div class="ai-status">
+                        <span class="status-dot"></span>
+                        <span class="status-text">Mossab AI - Online</span>
+                    </div>
+                </div>
+                <div class="header-right">
+                    <button class="icon-btn" id="newChatBtn" title="New Chat">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                    </button>
+                    <button class="icon-btn" id="settingsBtn" title="Settings">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M12 1v6m0 6v6m-8-7h6m6 0h6M4.22 4.22l4.24 4.24m7.08 7.08l4.24 4.24M19.78 4.22l-4.24 4.24m-7.08 7.08l-4.24 4.24"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Messages Container -->
+            <div class="messages-container" id="messagesContainer">
+                <!-- Welcome Message -->
+                <div class="welcome-screen">
+                    <div class="welcome-avatar">
+                        <div class="avatar-circle">
+                            <span class="avatar-text">M</span>
+                        </div>
+                    </div>
+                    <h1 class="welcome-title">Mossab</h1>
+                    <p class="welcome-subtitle">AI Developer & Programming Assistant</p>
+                    <p class="welcome-description">
+                        Il tuo sviluppatore artificiale, sempre pronto ad aiutarti con codice,
+                        architettura, debugging e soluzioni creative. Chiedimi qualsiasi cosa! 💻
+                    </p>
+
+                    <div class="quick-actions">
+                        <div class="quick-action-card" data-prompt="Ciao! Chi sei e cosa sai fare?">
+                            <div class="quick-action-icon">👋</div>
+                            <div class="quick-action-text">
+                                <div class="quick-action-title">Presentati</div>
+                                <div class="quick-action-desc">Scopri chi è Mossab</div>
+                            </div>
+                        </div>
+                        <div class="quick-action-card" data-prompt="Quali sono le tue competenze tecniche?">
+                            <div class="quick-action-icon">💻</div>
+                            <div class="quick-action-text">
+                                <div class="quick-action-title">Skills Tecniche</div>
+                                <div class="quick-action-desc">Linguaggi e framework</div>
+                            </div>
+                        </div>
+                        <div class="quick-action-card" data-prompt="Come posso creare un'API REST con Node.js?">
+                            <div class="quick-action-icon">🚀</div>
+                            <div class="quick-action-text">
+                                <div class="quick-action-title">Inizia un Progetto</div>
+                                <div class="quick-action-desc">Chiedi aiuto per il codice</div>
+                            </div>
+                        </div>
+                        <div class="quick-action-card" data-prompt="Spiegami perché il software nativo è importante">
+                            <div class="quick-action-icon">⚡</div>
+                            <div class="quick-action-text">
+                                <div class="quick-action-title">Software Nativo</div>
+                                <div class="quick-action-desc">Performance e ottimizzazione</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input Area -->
+            <div class="input-area">
+                <div class="input-wrapper">
+                    <button class="attach-btn" title="Attach file">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"></path>
+                        </svg>
+                    </button>
+                    <textarea
+                        id="messageInput"
+                        placeholder="Message Mossab..."
+                        rows="1"
+                    ></textarea>
+                    <button class="send-btn" id="sendBtn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
+                        </svg>
+                    </button>
+                </div>
+                <div class="input-footer">
+                    <div class="model-info">
+                        <span class="model-badge">Mossab v1.0</span>
+                        <span class="model-indicator">● Ready</span>
+                    </div>
+                    <div class="token-counter" id="tokenCounter">
+                        <span>~0 tokens</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/app.js"></script>
+</body>
+</html>

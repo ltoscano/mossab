@@ -1,5 +1,6 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const FilesystemTools = require('./filesystem-tools');
+const SkillManager = require('./skill-manager');
 
 /**
  * Claude Service - Gestisce l'integrazione con l'API di Claude
@@ -24,6 +25,12 @@ class ClaudeService {
 
         // Filesystem tools per operazioni su file
         this.filesystemTools = new FilesystemTools(workspaceRoot);
+
+        // Skill Manager per Agent Skills (agentskills.io standard)
+        this.skillManager = new SkillManager(workspaceRoot);
+        this.skillManager.initialize().catch(err => {
+            console.error('⚠️ SkillManager initialization failed:', err);
+        });
     }
 
     /**
@@ -102,6 +109,14 @@ Hai accesso a questi tool per operare concretamente:
   - Marca completed SUBITO dopo aver finito un task
   - Un solo task in_progress alla volta
 
+## Agent Skills
+- **invoke_skill**: Invoca una skill specializzata quando necessario
+  - Le skills sono moduli riutilizzabili per task specifici
+  - Ogni skill ha istruzioni dettagliate e script dedicati
+  - Usa questo quando il task corrisponde a una skill disponibile
+
+${this.getSkillsSection()}
+
 # Quando usare TODO
 
 USA todo_write quando:
@@ -115,7 +130,7 @@ NON usare per:
 - Risposte informative
 
 Esempio TODO:
-```json
+\`\`\`json
 {
   "todos": [
     {"content": "Leggere configurazione esistente", "activeForm": "Leggendo configurazione", "status": "completed"},
@@ -123,11 +138,34 @@ Esempio TODO:
     {"content": "Scrivere test", "activeForm": "Scrivendo test", "status": "pending"}
   ]
 }
-```
+\`\`\`
 
 Ricorda: Il tuo obiettivo è essere il miglior assistente di programmazione possibile,
 aiutando gli sviluppatori a scrivere codice migliore, più velocemente.
 Usa i tool per operare CONCRETAMENTE sui file, non limitarti a suggerire!`;
+    }
+
+    /**
+     * Genera la sezione skills per il system prompt
+     * Progressive disclosure: solo name + description (~100 tokens per skill)
+     */
+    getSkillsSection() {
+        if (!this.skillManager.loaded) {
+            return '(Nessuna skill caricata)';
+        }
+
+        const skills = this.skillManager.getSkillsMetadata();
+
+        if (skills.length === 0) {
+            return '(Nessuna skill disponibile. Puoi crearne di nuove in .claude/skills/)';
+        }
+
+        let section = 'Available Skills:\n';
+        for (const skill of skills) {
+            section += `- **${skill.name}**: ${skill.description}\n`;
+        }
+
+        return section;
     }
 
     /**
@@ -226,8 +264,30 @@ Usa i tool per operare CONCRETAMENTE sui file, non limitarti a suggerire!`;
             }
         ];
 
+        // Skill tool
+        const skillTools = [
+            {
+                name: 'invoke_skill',
+                description: 'Invoca una skill specializzata per eseguire un task specifico. Le skills sono moduli riutilizzabili che contengono istruzioni, script e risorse per task comuni. Usa questo quando il task dell\'utente corrisponde a una skill disponibile.',
+                input_schema: {
+                    type: 'object',
+                    properties: {
+                        skill_name: {
+                            type: 'string',
+                            description: 'Nome della skill da invocare (vedi lista Available Skills nel system prompt)'
+                        },
+                        context: {
+                            type: 'string',
+                            description: 'Contesto aggiuntivo o parametri per la skill'
+                        }
+                    },
+                    required: ['skill_name']
+                }
+            }
+        ];
+
         // Combina tutti i tool
-        return [...filesystemTools, ...legacyTools];
+        return [...filesystemTools, ...legacyTools, ...skillTools];
     }
 
     /**
@@ -289,6 +349,31 @@ Usa i tool per operare CONCRETAMENTE sui file, non limitarti a suggerire!`;
             case 'memory_recall':
                 const memory = this.conversationMemory.get(toolInput.key);
                 return memory || { success: false, message: 'Nessun ricordo trovato per questa chiave' };
+
+            case 'invoke_skill':
+                try {
+                    const skillContent = this.skillManager.getSkillContent(toolInput.skill_name);
+
+                    // Restituisci le istruzioni complete della skill
+                    // Progressive disclosure: full content caricato solo quando invocato
+                    return {
+                        success: true,
+                        skill_name: skillContent.name,
+                        description: skillContent.description,
+                        instructions: skillContent.instructions,
+                        context_provided: toolInput.context || null,
+                        metadata: skillContent.metadata,
+                        compatibility: skillContent.compatibility,
+                        allowed_tools: skillContent.allowedTools,
+                        message: `Skill '${skillContent.name}' invocata. Segui le istruzioni qui sotto per completare il task.\n\n# Istruzioni Skill\n\n${skillContent.instructions}`
+                    };
+                } catch (error) {
+                    return {
+                        success: false,
+                        error: error.message,
+                        available_skills: this.skillManager.listSkills()
+                    };
+                }
 
             default:
                 return { error: 'Tool non riconosciuto' };

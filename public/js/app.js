@@ -25,6 +25,14 @@ class MossabChat {
         this.todoProgress = document.getElementById('todoProgress');
         this.todoCurrentTask = document.getElementById('todoCurrentTask');
 
+        // Skills modal elements
+        this.skillsBtn = document.getElementById('skillsBtn');
+        this.skillsModal = document.getElementById('skillsModal');
+        this.skillsModalClose = document.getElementById('skillsModalClose');
+        this.skillsModalOverlay = document.getElementById('skillsModalOverlay');
+        this.skillsList = document.getElementById('skillsList');
+        this.skillsReloadBtn = document.getElementById('skillsReloadBtn');
+
         this.init();
     }
 
@@ -54,6 +62,12 @@ class MossabChat {
             }
         });
         this.stopStreamBtn.addEventListener('click', () => this.stopStreaming());
+
+        // Skills modal event listeners
+        this.skillsBtn.addEventListener('click', () => this.openSkillsModal());
+        this.skillsModalClose.addEventListener('click', () => this.closeSkillsModal());
+        this.skillsModalOverlay.addEventListener('click', () => this.closeSkillsModal());
+        this.skillsReloadBtn.addEventListener('click', () => this.reloadSkills());
 
         // Quick action cards
         const quickActionCards = document.querySelectorAll('.quick-action-card');
@@ -422,11 +436,131 @@ class MossabChat {
             console.error('Error stopping stream:', error);
         }
     }
+
+    /**
+     * SKILLS MODAL METHODS
+     */
+
+    /**
+     * Apri il modal delle skills
+     */
+    async openSkillsModal() {
+        this.skillsModal.classList.remove('hidden');
+        await this.loadSkills();
+    }
+
+    /**
+     * Chiudi il modal delle skills
+     */
+    closeSkillsModal() {
+        this.skillsModal.classList.add('hidden');
+    }
+
+    /**
+     * Carica la lista delle skills
+     */
+    async loadSkills() {
+        try {
+            this.skillsList.innerHTML = '<div class="skills-loading">Caricamento skills...</div>';
+
+            const response = await fetch('/api/skills');
+            const data = await response.json();
+
+            if (!data.skills || data.skills.length === 0) {
+                this.skillsList.innerHTML = `
+                    <div class="skills-empty">
+                        <p>Nessuna skill disponibile</p>
+                        <p class="skills-hint">
+                            Crea nuove skills nella directory <code>.claude/skills/</code><br>
+                            Segui lo standard <a href="https://agentskills.io" target="_blank">agentskills.io</a>
+                        </p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Renderizza le skills
+            let html = '';
+            for (const skill of data.skills) {
+                html += `
+                    <div class="skill-card">
+                        <div class="skill-header">
+                            <h3 class="skill-name">${skill.name}</h3>
+                            ${skill.license ? `<span class="skill-license">${skill.license}</span>` : ''}
+                        </div>
+                        <p class="skill-description">${skill.description}</p>
+                        ${skill.compatibility ? `<div class="skill-compatibility">📦 ${skill.compatibility}</div>` : ''}
+                        <div class="skill-actions">
+                            <button class="skill-use-btn" onclick="app.useSkill('${skill.name}')">
+                                Usa questa skill
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            this.skillsList.innerHTML = html;
+
+        } catch (error) {
+            console.error('Error loading skills:', error);
+            this.skillsList.innerHTML = `
+                <div class="skills-error">
+                    ⚠️ Errore nel caricamento delle skills
+                </div>
+            `;
+        }
+    }
+
+    /**
+     * Ricarica le skills
+     */
+    async reloadSkills() {
+        try {
+            this.skillsReloadBtn.disabled = true;
+            this.skillsReloadBtn.textContent = 'Reloading...';
+
+            const response = await fetch('/api/skills/reload', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                console.log(`✅ Reloaded ${data.count} skills`);
+                await this.loadSkills();
+            }
+
+        } catch (error) {
+            console.error('Error reloading skills:', error);
+            alert('Errore nel reload delle skills');
+        } finally {
+            this.skillsReloadBtn.disabled = false;
+            this.skillsReloadBtn.innerHTML = `
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"></path>
+                </svg>
+                Reload Skills
+            `;
+        }
+    }
+
+    /**
+     * Usa una skill inviando un messaggio a Mossab
+     */
+    useSkill(skillName) {
+        this.messageInput.value = `Per favore usa la skill "${skillName}" per aiutarmi`;
+        this.closeSkillsModal();
+        this.messageInput.focus();
+    }
 }
 
 // Initialize app when DOM is ready
+let app; // Global app instance for onclick handlers
 document.addEventListener('DOMContentLoaded', () => {
-    const app = new MossabChat();
+    app = new MossabChat();
 
     // Add some nice console message
     console.log('%c🤖 Mossab AI Developer', 'color: #7c4dff; font-size: 24px; font-weight: bold;');

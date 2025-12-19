@@ -480,6 +480,102 @@ app.get('/api/todos', (req, res) => {
     });
 });
 
+/**
+ * AGENT SKILLS ENDPOINTS
+ * Gestione delle skills seguendo lo standard agentskills.io
+ */
+
+/**
+ * GET /api/skills
+ * Lista tutte le skills disponibili
+ */
+app.get('/api/skills', (req, res) => {
+    if (!claudeService || !claudeService.skillManager) {
+        return res.json({
+            skills: [],
+            message: 'Skill system not available'
+        });
+    }
+
+    try {
+        const skills = claudeService.skillManager.listSkills();
+
+        res.json({
+            skills: skills,
+            count: skills.length,
+            skillsDirectory: '.claude/skills/'
+        });
+
+    } catch (error) {
+        console.error('Error listing skills:', error);
+        res.status(500).json({
+            error: 'Failed to list skills',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/skills/:name
+ * Ottieni dettagli completi di una skill
+ */
+app.get('/api/skills/:name', (req, res) => {
+    if (!claudeService || !claudeService.skillManager) {
+        return res.status(503).json({
+            error: 'Skill system not available'
+        });
+    }
+
+    try {
+        const { name } = req.params;
+        const skillContent = claudeService.skillManager.getSkillContent(name);
+
+        res.json({
+            skill: skillContent
+        });
+
+    } catch (error) {
+        console.error('Error getting skill:', error);
+        res.status(404).json({
+            error: 'Skill not found',
+            message: error.message,
+            available_skills: claudeService.skillManager.listSkills()
+        });
+    }
+});
+
+/**
+ * POST /api/skills/reload
+ * Ricarica tutte le skills (utile dopo aver aggiunto nuove skills)
+ */
+app.post('/api/skills/reload', async (req, res) => {
+    if (!claudeService || !claudeService.skillManager) {
+        return res.status(503).json({
+            error: 'Skill system not available'
+        });
+    }
+
+    try {
+        await claudeService.skillManager.reload();
+
+        const skills = claudeService.skillManager.listSkills();
+
+        res.json({
+            success: true,
+            message: 'Skills reloaded successfully',
+            count: skills.length,
+            skills: skills
+        });
+
+    } catch (error) {
+        console.error('Error reloading skills:', error);
+        res.status(500).json({
+            error: 'Failed to reload skills',
+            message: error.message
+        });
+    }
+});
+
 // Serve index.html per tutte le altre route
 app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, '../public/index.html'));

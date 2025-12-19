@@ -3,6 +3,8 @@ class MossabChat {
     constructor() {
         this.conversationHistory = [];
         this.isTyping = false;
+        this.isStreaming = false;
+        this.sessionId = 'session_' + Date.now();
 
         // DOM Elements
         this.messagesContainer = document.getElementById('messagesContainer');
@@ -10,6 +12,13 @@ class MossabChat {
         this.sendBtn = document.getElementById('sendBtn');
         this.newChatBtn = document.getElementById('newChatBtn');
         this.tokenCounter = document.getElementById('tokenCounter');
+
+        // Steering elements
+        this.steeringControl = document.getElementById('steeringControl');
+        this.steeringInput = document.getElementById('steeringInput');
+        this.sendSteeringBtn = document.getElementById('sendSteeringBtn');
+        this.stopStreamBtn = document.getElementById('stopStreamBtn');
+        this.mainInputArea = document.getElementById('mainInputArea');
 
         this.init();
     }
@@ -30,6 +39,16 @@ class MossabChat {
         });
 
         this.newChatBtn.addEventListener('click', () => this.newChat());
+
+        // Steering event listeners
+        this.sendSteeringBtn.addEventListener('click', () => this.sendSteering());
+        this.steeringInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                this.sendSteering();
+            }
+        });
+        this.stopStreamBtn.addEventListener('click', () => this.stopStreaming());
 
         // Quick action cards
         const quickActionCards = document.querySelectorAll('.quick-action-card');
@@ -87,6 +106,9 @@ class MossabChat {
         // Show typing indicator
         this.showTypingIndicator();
 
+        // Show steering controls during response generation
+        this.showSteeringControls();
+
         try {
             // Call API
             const response = await fetch('/api/chat', {
@@ -96,7 +118,8 @@ class MossabChat {
                 },
                 body: JSON.stringify({
                     message: message,
-                    conversationHistory: this.conversationHistory
+                    conversationHistory: this.conversationHistory,
+                    sessionId: this.sessionId
                 })
             });
 
@@ -106,8 +129,9 @@ class MossabChat {
 
             const data = await response.json();
 
-            // Hide typing indicator
+            // Hide typing indicator and steering controls
             this.hideTypingIndicator();
+            this.hideSteeringControls();
 
             // Add assistant response
             this.addMessage('assistant', data.message);
@@ -121,6 +145,7 @@ class MossabChat {
         } catch (error) {
             console.error('Error sending message:', error);
             this.hideTypingIndicator();
+            this.hideSteeringControls();
             this.addMessage('assistant', '⚠️ Mi dispiace, si è verificato un errore. Riprova per favore.');
         }
 
@@ -243,6 +268,106 @@ class MossabChat {
         this.autoResize();
         this.updateTokenCounter();
         this.messageInput.focus();
+
+        // Reset session
+        this.sessionId = 'session_' + Date.now();
+    }
+
+    /**
+     * STEERING METHODS
+     * Permettono di dare feedback in real-time durante la generazione
+     */
+
+    /**
+     * Mostra i controlli di steering
+     */
+    showSteeringControls() {
+        this.isStreaming = true;
+        this.steeringControl.classList.remove('hidden');
+        this.mainInputArea.style.opacity = '0.5';
+        this.mainInputArea.style.pointerEvents = 'none';
+    }
+
+    /**
+     * Nasconde i controlli di steering
+     */
+    hideSteeringControls() {
+        this.isStreaming = false;
+        this.steeringControl.classList.add('hidden');
+        this.mainInputArea.style.opacity = '1';
+        this.mainInputArea.style.pointerEvents = 'auto';
+        this.steeringInput.value = '';
+    }
+
+    /**
+     * Invia un messaggio di steering durante la generazione
+     */
+    async sendSteering() {
+        const steeringText = this.steeringInput.value.trim();
+
+        if (!steeringText) return;
+
+        console.log(`🎯 Sending steering: "${steeringText}"`);
+
+        try {
+            const response = await fetch(`/api/steering/${this.sessionId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    steeringMessage: steeringText
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                console.log('✅ Steering sent successfully');
+
+                // Mostra feedback visivo
+                this.steeringInput.value = '';
+                this.steeringInput.placeholder = '✨ Feedback inviato! Mossab sta aggiustando...';
+
+                setTimeout(() => {
+                    this.steeringInput.placeholder = 'Dai feedback in tempo reale...';
+                }, 2000);
+
+            } else {
+                console.error('❌ Steering failed:', data.error);
+                alert('Impossibile inviare il feedback: ' + data.error);
+            }
+
+        } catch (error) {
+            console.error('Error sending steering:', error);
+            alert('Errore nell\'invio del feedback');
+        }
+    }
+
+    /**
+     * Ferma lo streaming in corso
+     */
+    async stopStreaming() {
+        console.log('🛑 Stopping stream...');
+
+        try {
+            const response = await fetch(`/api/streaming/${this.sessionId}/stop`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                console.log('✅ Stream stopped');
+                this.hideSteeringControls();
+            }
+
+        } catch (error) {
+            console.error('Error stopping stream:', error);
+        }
     }
 }
 

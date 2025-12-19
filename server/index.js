@@ -4,6 +4,7 @@ const path = require('path');
 require('dotenv').config();
 
 const ClaudeService = require('./claude-service');
+const StreamingManager = require('./streaming-manager');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -22,6 +23,10 @@ try {
     console.warn('⚠️ Claude Service initialization failed:', error.message);
     console.warn('📝 Mossab will run with limited capabilities');
 }
+
+// Inizializza Streaming Manager per steering support
+const streamingManager = new StreamingManager();
+console.log('✅ Streaming Manager initialized - steering support enabled');
 
 // Session storage (in produzione usare Redis o DB)
 const sessions = new Map();
@@ -300,6 +305,149 @@ app.get('/api/session/:sessionId', (req, res) => {
     } else {
         res.status(404).json({ error: 'Session not found' });
     }
+});
+
+/**
+ * STEERING ENDPOINTS
+ * Permettono di dare feedback in real-time durante la generazione
+ */
+
+/**
+ * POST /api/steering/:sessionId
+ * Invia un messaggio di steering per ri-indirizzare la risposta in corso
+ */
+app.post('/api/steering/:sessionId', async (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const { steeringMessage } = req.body;
+
+        if (!steeringMessage || typeof steeringMessage !== 'string') {
+            return res.status(400).json({
+                error: 'steeringMessage is required and must be a string'
+            });
+        }
+
+        // Verifica se la sessione sta streamando
+        const streamState = streamingManager.getSessionState(sessionId);
+
+        if (!streamState.exists) {
+            return res.status(404).json({
+                error: 'Session not found or not streaming'
+            });
+        }
+
+        if (!streamState.active) {
+            return res.status(400).json({
+                error: 'Session is not actively streaming',
+                hint: 'Steering can only be applied during active generation'
+            });
+        }
+
+        // Aggiungi il messaggio di steering
+        const result = streamingManager.addSteeringMessage(sessionId, steeringMessage);
+
+        if (!result.success) {
+            return res.status(500).json({
+                error: 'Failed to add steering message',
+                details: result.error
+            });
+        }
+
+        res.json({
+            success: true,
+            message: 'Steering message added successfully',
+            sessionId: sessionId,
+            steeringText: steeringMessage,
+            queuePosition: result.queueLength,
+            accumulatedTextLength: result.accumulatedText.length,
+            hint: 'The AI will incorporate your feedback in the ongoing response'
+        });
+
+    } catch (error) {
+        console.error('Error in steering endpoint:', error);
+        res.status(500).json({
+            error: 'Internal server error',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/streaming/:sessionId/pause
+ * Pausa temporaneamente lo streaming
+ */
+app.post('/api/streaming/:sessionId/pause', (req, res) => {
+    const { sessionId } = req.params;
+
+    const success = streamingManager.pauseSession(sessionId);
+
+    if (success) {
+        res.json({
+            success: true,
+            message: 'Session paused',
+            sessionId: sessionId
+        });
+    } else {
+        res.status(404).json({
+            error: 'Session not found or not active'
+        });
+    }
+});
+
+/**
+ * POST /api/streaming/:sessionId/resume
+ * Riprende lo streaming pausato
+ */
+app.post('/api/streaming/:sessionId/resume', (req, res) => {
+    const { sessionId } = req.params;
+
+    const success = streamingManager.resumeSession(sessionId);
+
+    if (success) {
+        res.json({
+            success: true,
+            message: 'Session resumed',
+            sessionId: sessionId
+        });
+    } else {
+        res.status(404).json({
+            error: 'Session not found or not paused'
+        });
+    }
+});
+
+/**
+ * POST /api/streaming/:sessionId/stop
+ * Ferma completamente lo streaming
+ */
+app.post('/api/streaming/:sessionId/stop', (req, res) => {
+    const { sessionId } = req.params;
+
+    const success = streamingManager.stopSession(sessionId);
+
+    if (success) {
+        res.json({
+            success: true,
+            message: 'Session stopped',
+            sessionId: sessionId
+        });
+    } else {
+        res.status(404).json({
+            error: 'Session not found'
+        });
+    }
+});
+
+/**
+ * GET /api/streaming/:sessionId/state
+ * Ottieni lo stato corrente dello streaming
+ */
+app.get('/api/streaming/:sessionId/state', (req, res) => {
+    const { sessionId } = req.params;
+
+    const state = streamingManager.getSessionState(sessionId);
+
+    res.json(state);
 });
 
 // Serve index.html per tutte le altre route

@@ -372,6 +372,151 @@ aiutando gli sviluppatori a scrivere codice migliore, più velocemente.`;
 
         return stream;
     }
+
+    /**
+     * Stream con supporto per steering in real-time
+     * Permette di interrompere e ri-indirizzare la risposta durante la generazione
+     *
+     * @param {string} userMessage - Il messaggio dell'utente
+     * @param {Array} conversationHistory - Storia della conversazione
+     * @param {Object} streamingManager - Manager per gestire lo steering
+     * @param {string} sessionId - ID della sessione
+     * @param {Function} onChunk - Callback per ogni chunk di testo
+     * @param {Function} onComplete - Callback al completamento
+     * @param {Function} onError - Callback per errori
+     */
+    async streamWithSteering(userMessage, conversationHistory, streamingManager, sessionId, onChunk, onComplete, onError) {
+        try {
+            // Registra la sessione
+            const session = streamingManager.getOrCreateSession(sessionId);
+            session.active = true;
+            session.accumulatedText = '';
+
+            const messages = [
+                ...conversationHistory.map(msg => ({
+                    role: msg.role,
+                    content: msg.content
+                })),
+                {
+                    role: 'user',
+                    content: userMessage
+                }
+            ];
+
+            let currentMessages = [...messages];
+            let shouldContinue = true;
+
+            // Loop per gestire lo steering: se arrivano feedback, ripartiamo
+            while (shouldContinue) {
+                const stream = await this.client.messages.stream({
+                    model: this.model,
+                    max_tokens: this.maxTokens,
+                    system: this.getSystemPrompt(),
+                    messages: currentMessages,
+                    tools: this.getTools(),
+                    thinking: {
+                        type: 'enabled',
+                        budget_tokens: 2000
+                    }
+                });
+
+                let chunkCount = 0;
+                let steeringApplied = false;
+
+                // Processa lo stream
+                for await (const chunk of stream) {
+                    // Check se la sessione è stata fermata
+                    if (!streamingManager.isStreaming(sessionId)) {
+                        console.log(`🛑 Streaming stopped for session ${sessionId}`);
+                        stream.controller.abort();
+                        shouldContinue = false;
+                        break;
+                    }
+
+                    // Check se ci sono messaggi di steering in coda
+                    const pendingSteering = streamingManager.getSteeringQueue(sessionId);
+                    if (pendingSteering.length > 0) {
+                        console.log(`🎯 Steering detected! Interrupting stream to apply feedback...`);
+
+                        // Interrompi lo stream corrente
+                        stream.controller.abort();
+
+                        // Costruisci nuovo messaggio con il contesto + steering
+                        const steeringTexts = pendingSteering.map(s => s.text).join('\n\n');
+                        const steeringPrompt = `
+[STEERING FEEDBACK dall'utente durante la tua risposta]
+${steeringTexts}
+
+[Contesto: Stavi rispondendo e hai generato finora circa ${session.accumulatedText.length} caratteri]
+
+Per favore, incorpora questo feedback nella tua risposta e continua, tenendo conto delle indicazioni ricevute.
+`;
+
+                        // Aggiungi alla conversazione
+                        currentMessages.push({
+                            role: 'assistant',
+                            content: session.accumulatedText
+                        });
+                        currentMessages.push({
+                            role: 'user',
+                            content: steeringPrompt
+                        });
+
+                        // Marca lo steering come processato
+                        streamingManager.markSteeringProcessed(sessionId);
+
+                        // Notifica il client che stiamo applicando lo steering
+                        if (onChunk) {
+                            onChunk('\n\n_[✨ Applicando feedback di steering...]_\n\n');
+                        }
+
+                        steeringApplied = true;
+                        break; // Esci dal loop dei chunk, riparti con nuovo stream
+                    }
+
+                    // Processa il chunk normalmente
+                    if (chunk.type === 'content_block_delta') {
+                        if (chunk.delta.type === 'text_delta') {
+                            const text = chunk.delta.text;
+                            session.accumulatedText += text;
+
+                            if (onChunk) {
+                                onChunk(text);
+                            }
+
+                            chunkCount++;
+                        }
+                    }
+                }
+
+                // Se non c'è stato steering, abbiamo finito
+                if (!steeringApplied) {
+                    shouldContinue = false;
+                }
+            }
+
+            // Stream completato
+            session.active = false;
+
+            if (onComplete) {
+                onComplete(session.accumulatedText);
+            }
+
+            return session.accumulatedText;
+
+        } catch (error) {
+            console.error('❌ Error in streaming with steering:', error);
+
+            if (onError) {
+                onError(error);
+            }
+
+            throw error;
+        } finally {
+            // Cleanup session
+            streamingManager.cleanupSession(sessionId);
+        }
+    }
 }
 
 module.exports = ClaudeService;

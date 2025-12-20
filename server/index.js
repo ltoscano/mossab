@@ -631,6 +631,105 @@ app.get('/api/questions/stats', (req, res) => {
 });
 
 /**
+ * CONTEXT MANAGEMENT ENDPOINTS
+ * Gestione context window e automatic summarization
+ */
+
+/**
+ * GET /api/context/stats/:sessionId
+ * Ottieni statistiche sul context usage di una sessione
+ */
+app.get('/api/context/stats/:sessionId', async (req, res) => {
+    const { sessionId } = req.params;
+
+    if (!claudeService) {
+        return res.json({
+            current: 0,
+            max: 200000,
+            percentage: 0,
+            remaining: 200000,
+            status: 'normal'
+        });
+    }
+
+    try {
+        // Ottieni conversation history dalla sessione
+        const conversationHistory = sessions.get(sessionId) || [];
+
+        // Ottieni stats dal ContextManager
+        const stats = await claudeService.getContextStats(conversationHistory);
+
+        res.json(stats);
+
+    } catch (error) {
+        console.error('Error getting context stats:', error);
+        res.status(500).json({
+            error: 'Failed to get context stats',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/context/summarize/:sessionId
+ * Trigger manual summarization di una conversazione
+ */
+app.post('/api/context/summarize/:sessionId', async (req, res) => {
+    const { sessionId } = req.params;
+
+    if (!claudeService) {
+        return res.status(503).json({
+            error: 'Claude service not available'
+        });
+    }
+
+    try {
+        // Ottieni conversation history
+        const conversationHistory = sessions.get(sessionId) || [];
+
+        if (conversationHistory.length === 0) {
+            return res.json({
+                success: true,
+                message: 'No messages to summarize',
+                optimized: []
+            });
+        }
+
+        // Trigger summarization
+        const optimized = await claudeService.triggerSummarization(conversationHistory);
+
+        // Aggiorna la sessione con history ottimizzata
+        sessions.set(sessionId, optimized);
+
+        // Calcola saving
+        const originalTokens = await claudeService.contextManager.countTokens(conversationHistory);
+        const optimizedTokens = await claudeService.contextManager.countTokens(optimized);
+        const savedTokens = originalTokens - optimizedTokens;
+        const savedPercentage = ((savedTokens / originalTokens) * 100).toFixed(1);
+
+        res.json({
+            success: true,
+            message: 'Conversation summarized successfully',
+            stats: {
+                originalMessages: conversationHistory.length,
+                optimizedMessages: optimized.length,
+                originalTokens: originalTokens,
+                optimizedTokens: optimizedTokens,
+                savedTokens: savedTokens,
+                savedPercentage: savedPercentage
+            }
+        });
+
+    } catch (error) {
+        console.error('Error in manual summarization:', error);
+        res.status(500).json({
+            error: 'Summarization failed',
+            message: error.message
+        });
+    }
+});
+
+/**
  * MCP SERVER ENDPOINTS
  * Gestione configurazione e connessioni MCP servers
  */

@@ -33,6 +33,22 @@
                         <span id="todoProgress">0/0</span>
                         <span id="todoCurrentTask" class="todo-current"></span>
                     </div>
+                    <!-- Context Usage Indicator -->
+                    <div class="context-usage" id="contextUsage">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2v20M2 12h20"></path>
+                            <circle cx="12" cy="12" r="10"></circle>
+                        </svg>
+                        <div class="context-bar">
+                            <div class="context-fill" id="contextFill"></div>
+                        </div>
+                        <span class="context-text" id="contextText">0K / 200K</span>
+                        <button class="context-summarize-btn hidden" id="contextSummarizeBtn" title="Summarize conversation">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"></path>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
                 <div class="header-right">
                     <button class="icon-btn" id="mcpBtn" title="MCP Servers">

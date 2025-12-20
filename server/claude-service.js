@@ -4,6 +4,7 @@ const SkillManager = require('./skill-manager');
 const WebTools = require('./web-tools');
 const UserQuestionManager = require('./user-question-manager');
 const MCPManager = require('./mcp-manager');
+const ContextManager = require('./context-manager');
 
 /**
  * Claude Service - Gestisce l'integrazione con l'API di Claude
@@ -46,6 +47,12 @@ class ClaudeService {
         this.mcpManager.initialize().catch(err => {
             console.error('⚠️ MCPManager initialization failed:', err);
         });
+
+        // Context Manager per gestione automatica del context window
+        this.contextManager = new ContextManager(this.model);
+
+        // Esponi client Anthropic per ContextManager (per summarization)
+        this.anthropic = this.client;
     }
 
     /**
@@ -508,7 +515,7 @@ Usa i tool per operare CONCRETAMENTE sui file, non limitarti a suggerire!`;
     async sendMessage(userMessage, conversationHistory = [], sessionId = 'default') {
         try {
             // Costruisci i messaggi per l'API
-            const messages = [
+            let messages = [
                 ...conversationHistory.map(msg => ({
                     role: msg.role,
                     content: msg.content
@@ -518,6 +525,14 @@ Usa i tool per operare CONCRETAMENTE sui file, non limitarti a suggerire!`;
                     content: userMessage
                 }
             ];
+
+            // Context Management: check se serve summarization
+            const shouldSummarize = await this.contextManager.shouldSummarize(messages);
+            if (shouldSummarize) {
+                console.log('⚠️ Context approaching limit, triggering automatic summarization...');
+                messages = await this.contextManager.summarizeConversation(messages, this);
+                console.log('✅ Conversation summarized successfully');
+            }
 
             // Chiamata all'API di Claude con tool use
             const response = await this.client.messages.create({
@@ -784,6 +799,59 @@ Per favore, incorpora questo feedback nella tua risposta e continua, tenendo con
         } finally {
             // Cleanup session
             streamingManager.cleanupSession(sessionId);
+        }
+    }
+
+    /**
+     * Ottieni statistiche sul context usage
+     * @param {Array} conversationHistory - Storia della conversazione
+     * @returns {Object} Context stats (current, max, percentage, status, etc.)
+     */
+    async getContextStats(conversationHistory = []) {
+        try {
+            const messages = conversationHistory.map(msg => ({
+                role: msg.role,
+                content: msg.content
+            }));
+
+            const stats = await this.contextManager.getContextStats(
+                messages,
+                this.getSystemPrompt()
+            );
+
+            return stats;
+        } catch (error) {
+            console.error('Error getting context stats:', error);
+            // Fallback stats
+            return {
+                current: 0,
+                max: 200000,
+                percentage: 0,
+                remaining: 200000,
+                status: 'normal',
+                shouldSummarize: false
+            };
+        }
+    }
+
+    /**
+     * Trigger manual summarization
+     * @param {Array} conversationHistory - Storia della conversazione
+     * @returns {Array} Optimized conversation history
+     */
+    async triggerSummarization(conversationHistory = []) {
+        try {
+            const messages = conversationHistory.map(msg => ({
+                role: msg.role,
+                content: msg.content
+            }));
+
+            const optimized = await this.contextManager.summarizeConversation(messages, this);
+
+            return optimized;
+        } catch (error) {
+            console.error('Error in manual summarization:', error);
+            throw error;
         }
     }
 }

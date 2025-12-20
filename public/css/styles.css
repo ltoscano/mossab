@@ -198,6 +198,111 @@ body {
     border-left: 1px solid rgba(124, 77, 255, 0.3);
 }
 
+/* Context Usage Indicator */
+.context-usage {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 16px;
+    padding: 4px 10px;
+    background: rgba(52, 211, 153, 0.15);
+    border-radius: 12px;
+    font-size: 12px;
+    color: var(--accent-success);
+    animation: slideDown 0.3s ease-out;
+}
+
+.context-usage svg {
+    color: var(--accent-success);
+}
+
+.context-bar {
+    width: 60px;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 2px;
+    overflow: hidden;
+    position: relative;
+}
+
+.context-fill {
+    height: 100%;
+    background: var(--accent-success);
+    transition: width 0.3s ease, background-color 0.3s ease;
+    border-radius: 2px;
+}
+
+.context-fill.warning {
+    background: #fbbf24;
+}
+
+.context-fill.critical {
+    background: #ef4444;
+}
+
+.context-usage.warning {
+    background: rgba(251, 191, 36, 0.15);
+}
+
+.context-usage.warning svg,
+.context-usage.warning .context-text {
+    color: #fbbf24;
+}
+
+.context-usage.critical {
+    background: rgba(239, 68, 68, 0.15);
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.context-usage.critical svg,
+.context-usage.critical .context-text {
+    color: #ef4444;
+}
+
+.context-text {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent-success);
+    min-width: 70px;
+    text-align: right;
+}
+
+.context-summarize-btn {
+    background: rgba(124, 77, 255, 0.2);
+    border: 1px solid rgba(124, 77, 255, 0.3);
+    border-radius: 4px;
+    padding: 4px 6px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.context-summarize-btn:hover {
+    background: rgba(124, 77, 255, 0.3);
+    border-color: rgba(124, 77, 255, 0.5);
+}
+
+.context-summarize-btn svg {
+    width: 12px;
+    height: 12px;
+    color: var(--accent-primary);
+}
+
+.context-summarize-btn.hidden {
+    display: none;
+}
+
+@keyframes pulse {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.7;
+    }
+}
+
 .header-center {
     display: flex;
     align-items: center;
@@ -451,6 +556,26 @@ body {
 
 .message.assistant .message-content {
     background: var(--assistant-msg-bg);
+}
+
+.message.system-message {
+    text-align: center;
+    margin: 16px 0;
+}
+
+.message.system-message .message-content {
+    display: inline-block;
+    background: rgba(124, 77, 255, 0.1);
+    border: 1px solid rgba(124, 77, 255, 0.2);
+    padding: 8px 16px;
+    border-radius: 12px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.message.system-message .message-text {
+    color: var(--accent-primary);
+    font-weight: 500;
 }
 
 .message-content p {

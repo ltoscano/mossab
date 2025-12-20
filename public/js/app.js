@@ -47,6 +47,13 @@ class MossabChat {
         this.mcpCancelAddBtn = document.getElementById('mcpCancelAddBtn');
         this.mcpSubmitAddBtn = document.getElementById('mcpSubmitAddBtn');
 
+        // Context usage elements
+        this.contextUsage = document.getElementById('contextUsage');
+        this.contextFill = document.getElementById('contextFill');
+        this.contextText = document.getElementById('contextText');
+        this.contextSummarizeBtn = document.getElementById('contextSummarizeBtn');
+        this.contextUpdateInterval = null;
+
         // Question modal elements
         this.questionModal = document.getElementById('questionModal');
         this.questionContext = document.getElementById('questionContext');
@@ -104,6 +111,9 @@ class MossabChat {
         this.mcpCancelAddBtn.addEventListener('click', () => this.hideMCPAddForm());
         this.mcpSubmitAddBtn.addEventListener('click', () => this.submitMCPServer());
 
+        // Context management event listeners
+        this.contextSummarizeBtn.addEventListener('click', () => this.triggerManualSummarization());
+
         // Question modal event listeners
         this.questionSubmitBtn.addEventListener('click', () => this.submitAnswer());
         this.questionCancelBtn.addEventListener('click', () => this.cancelQuestion());
@@ -132,6 +142,9 @@ class MossabChat {
 
         // Start question polling
         this.startQuestionPolling();
+
+        // Start context usage polling
+        this.startContextPolling();
     }
 
     /**
@@ -888,6 +901,130 @@ class MossabChat {
                 Reload
             `;
         }
+    }
+
+    /**
+     * CONTEXT MANAGEMENT METHODS
+     */
+
+    /**
+     * Avvia il polling per aggiornare il context usage
+     */
+    startContextPolling() {
+        // Update ogni 5 secondi (meno frequente per performance)
+        this.contextUpdateInterval = setInterval(() => {
+            this.updateContextUsage();
+        }, 5000);
+
+        // Initial update
+        this.updateContextUsage();
+    }
+
+    /**
+     * Aggiorna l'indicatore di context usage
+     */
+    async updateContextUsage() {
+        try {
+            const response = await fetch(`/api/context/stats/${this.sessionId}`);
+            const stats = await response.json();
+
+            // Aggiorna percentuale
+            const percentage = stats.percentage || 0;
+            this.contextFill.style.width = `${percentage}%`;
+
+            // Aggiorna testo
+            const currentK = Math.round(stats.current / 1000);
+            const maxK = Math.round(stats.max / 1000);
+            this.contextText.textContent = `${currentK}K / ${maxK}K`;
+
+            // Aggiorna stato visivo
+            this.contextUsage.classList.remove('warning', 'critical');
+            this.contextFill.classList.remove('warning', 'critical');
+
+            if (stats.status === 'critical') {
+                this.contextUsage.classList.add('critical');
+                this.contextFill.classList.add('critical');
+                this.contextSummarizeBtn.classList.remove('hidden');
+            } else if (stats.status === 'warning') {
+                this.contextUsage.classList.add('warning');
+                this.contextFill.classList.add('warning');
+                this.contextSummarizeBtn.classList.remove('hidden');
+            } else {
+                this.contextSummarizeBtn.classList.add('hidden');
+            }
+
+        } catch (error) {
+            console.error('Error updating context usage:', error);
+            // Fallback silente
+        }
+    }
+
+    /**
+     * Trigger manual summarization
+     */
+    async triggerManualSummarization() {
+        if (!confirm('Vuoi riassumere la conversazione per liberare spazio nel context?\n\nQuesta operazione preserverà codice e decisioni importanti.')) {
+            return;
+        }
+
+        try {
+            this.contextSummarizeBtn.disabled = true;
+            this.contextSummarizeBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle></svg>';
+
+            const response = await fetch(`/api/context/summarize/${this.sessionId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                // Mostra stats del risparmio
+                const { stats } = data;
+                console.log(`✅ Conversation summarized successfully!`);
+                console.log(`   Messages: ${stats.originalMessages} → ${stats.optimizedMessages}`);
+                console.log(`   Tokens: ${stats.originalTokens.toLocaleString()} → ${stats.optimizedTokens.toLocaleString()}`);
+                console.log(`   Saved: ${stats.savedTokens.toLocaleString()} tokens (${stats.savedPercentage}%)`);
+
+                // Aggiungi messaggio di sistema nella chat
+                this.addSystemMessage(
+                    `🧠 Context Summarized: ${stats.savedPercentage}% saved (${stats.originalMessages} → ${stats.optimizedMessages} messages)`
+                );
+
+                // Update context usage
+                await this.updateContextUsage();
+            } else {
+                alert(`Errore: ${data.error || data.message}`);
+            }
+
+        } catch (error) {
+            console.error('Error in manual summarization:', error);
+            alert('Errore durante la summarization');
+        } finally {
+            this.contextSummarizeBtn.disabled = false;
+            this.contextSummarizeBtn.innerHTML = `
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"></path>
+                </svg>
+            `;
+        }
+    }
+
+    /**
+     * Aggiungi messaggio di sistema
+     */
+    addSystemMessage(text) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = 'message system-message';
+        messageDiv.innerHTML = `
+            <div class="message-content">
+                <div class="message-text">${text}</div>
+            </div>
+        `;
+        this.messagesContainer.appendChild(messageDiv);
+        this.scrollToBottom();
     }
 
     /**

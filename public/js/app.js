@@ -54,6 +54,23 @@ class MossabChat {
         this.contextSummarizeBtn = document.getElementById('contextSummarizeBtn');
         this.contextUpdateInterval = null;
 
+        // Project Context modal elements
+        this.projectBtn = document.getElementById('projectBtn');
+        this.projectModal = document.getElementById('projectModal');
+        this.projectModalClose = document.getElementById('projectModalClose');
+        this.projectModalOverlay = document.getElementById('projectModalOverlay');
+        this.projectTemplate = document.getElementById('projectTemplate');
+        this.projectApplyTemplateBtn = document.getElementById('projectApplyTemplateBtn');
+        this.projectInstructions = document.getElementById('projectInstructions');
+        this.prefFramework = document.getElementById('prefFramework');
+        this.prefLanguage = document.getElementById('prefLanguage');
+        this.prefTestFramework = document.getElementById('prefTestFramework');
+        this.prefStyling = document.getElementById('prefStyling');
+        this.stdNaming = document.getElementById('stdNaming');
+        this.stdFileStructure = document.getElementById('stdFileStructure');
+        this.projectResetBtn = document.getElementById('projectResetBtn');
+        this.projectSaveBtn = document.getElementById('projectSaveBtn');
+
         // Question modal elements
         this.questionModal = document.getElementById('questionModal');
         this.questionContext = document.getElementById('questionContext');
@@ -113,6 +130,14 @@ class MossabChat {
 
         // Context management event listeners
         this.contextSummarizeBtn.addEventListener('click', () => this.triggerManualSummarization());
+
+        // Project Context modal event listeners
+        this.projectBtn.addEventListener('click', () => this.openProjectModal());
+        this.projectModalClose.addEventListener('click', () => this.closeProjectModal());
+        this.projectModalOverlay.addEventListener('click', () => this.closeProjectModal());
+        this.projectApplyTemplateBtn.addEventListener('click', () => this.applyProjectTemplate());
+        this.projectSaveBtn.addEventListener('click', () => this.saveProjectContext());
+        this.projectResetBtn.addEventListener('click', () => this.resetProjectContext());
 
         // Question modal event listeners
         this.questionSubmitBtn.addEventListener('click', () => this.submitAnswer());
@@ -1025,6 +1050,115 @@ class MossabChat {
         `;
         this.messagesContainer.appendChild(messageDiv);
         this.scrollToBottom();
+    }
+
+    /**
+     * PROJECT CONTEXT METHODS
+     */
+
+    async openProjectModal() {
+        this.projectModal.classList.remove('hidden');
+        await this.loadProjectContext();
+    }
+
+    closeProjectModal() {
+        this.projectModal.classList.add('hidden');
+    }
+
+    async loadProjectContext() {
+        try {
+            const response = await fetch('/api/project/context');
+            const context = await response.json();
+
+            this.projectInstructions.value = context.instructions || '';
+            this.prefFramework.value = context.preferences?.framework || '';
+            this.prefLanguage.value = context.preferences?.language || '';
+            this.prefTestFramework.value = context.preferences?.testFramework || '';
+            this.prefStyling.value = context.preferences?.styling || '';
+            this.stdNaming.value = context.standards?.naming || '';
+            this.stdFileStructure.value = context.standards?.fileStructure || '';
+        } catch (error) {
+            console.error('Error loading project context:', error);
+        }
+    }
+
+    async applyProjectTemplate() {
+        const templateName = this.projectTemplate.value;
+        if (!templateName) return;
+
+        try {
+            const response = await fetch(`/api/project/template/${templateName}`, {
+                method: 'POST'
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                await this.loadProjectContext();
+                console.log(`✅ Template "${templateName}" applied`);
+            }
+        } catch (error) {
+            console.error('Error applying template:', error);
+            alert('Errore nell\'applicazione del template');
+        }
+    }
+
+    async saveProjectContext() {
+        try {
+            this.projectSaveBtn.disabled = true;
+            this.projectSaveBtn.textContent = 'Saving...';
+
+            const updates = {
+                instructions: this.projectInstructions.value,
+                preferences: {
+                    framework: this.prefFramework.value,
+                    language: this.prefLanguage.value,
+                    testFramework: this.prefTestFramework.value,
+                    styling: this.prefStyling.value
+                },
+                standards: {
+                    naming: this.stdNaming.value,
+                    fileStructure: this.stdFileStructure.value
+                }
+            };
+
+            const response = await fetch('/api/project/context', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updates)
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                console.log('✅ Project context saved');
+                this.addSystemMessage('📋 Project context saved successfully');
+            }
+        } catch (error) {
+            console.error('Error saving project context:', error);
+            alert('Errore nel salvataggio');
+        } finally {
+            this.projectSaveBtn.disabled = false;
+            this.projectSaveBtn.textContent = 'Save';
+        }
+    }
+
+    async resetProjectContext() {
+        if (!confirm('Reset project context to defaults?')) return;
+
+        try {
+            const response = await fetch('/api/project/context', {
+                method: 'DELETE'
+            });
+            const data = await response.json();
+
+            if (data.success) {
+                await this.loadProjectContext();
+                console.log('✅ Project context reset');
+            }
+        } catch (error) {
+            console.error('Error resetting project context:', error);
+            alert('Errore nel reset');
+        }
     }
 
     /**

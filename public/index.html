@@ -51,6 +51,12 @@
                     </div>
                 </div>
                 <div class="header-right">
+                    <button class="icon-btn" id="projectBtn" title="Project Context">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
+                            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
+                        </svg>
+                    </button>
                     <button class="icon-btn" id="mcpBtn" title="MCP Servers">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
@@ -334,6 +340,94 @@
                         </svg>
                         Aggiungi Server
                     </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Project Context Modal -->
+    <div class="project-modal hidden" id="projectModal">
+        <div class="project-modal-overlay" id="projectModalOverlay"></div>
+        <div class="project-modal-content">
+            <div class="project-modal-header">
+                <h2>📋 Project Context</h2>
+                <button class="project-modal-close" id="projectModalClose">×</button>
+            </div>
+            <div class="project-modal-body">
+                <p class="project-description">
+                    Configura le preferenze e le istruzioni del progetto. Queste informazioni verranno
+                    iniettate automaticamente nel system prompt di Mossab per ogni conversazione.
+                </p>
+
+                <!-- Templates Quick Select -->
+                <div class="project-templates">
+                    <label>Quick Templates:</label>
+                    <select id="projectTemplate" class="project-template-select">
+                        <option value="">-- Scegli template --</option>
+                        <option value="react">React 18 + TypeScript</option>
+                        <option value="vue">Vue 3 + Composition API</option>
+                        <option value="nodejs">Node.js + Express</option>
+                        <option value="python">Python + FastAPI</option>
+                        <option value="fullstack">Full-Stack Monorepo</option>
+                    </select>
+                    <button class="project-apply-template-btn" id="projectApplyTemplateBtn">Apply</button>
+                </div>
+
+                <!-- Instructions -->
+                <div class="project-form-group">
+                    <label for="projectInstructions">Project Instructions</label>
+                    <textarea
+                        id="projectInstructions"
+                        rows="4"
+                        placeholder="Descrivi il progetto... (es: 'This is a React 18 project using TypeScript and modern hooks')"
+                    ></textarea>
+                </div>
+
+                <!-- Preferences -->
+                <div class="project-section">
+                    <h3>Development Preferences</h3>
+                    <div class="project-preferences-grid">
+                        <div class="project-form-group">
+                            <label>Framework</label>
+                            <input type="text" id="prefFramework" placeholder="React, Vue, Express..." />
+                        </div>
+                        <div class="project-form-group">
+                            <label>Language</label>
+                            <input type="text" id="prefLanguage" placeholder="TypeScript, JavaScript..." />
+                        </div>
+                        <div class="project-form-group">
+                            <label>Test Framework</label>
+                            <input type="text" id="prefTestFramework" placeholder="Jest, Vitest..." />
+                        </div>
+                        <div class="project-form-group">
+                            <label>Styling</label>
+                            <input type="text" id="prefStyling" placeholder="CSS Modules, Tailwind..." />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Standards -->
+                <div class="project-section">
+                    <h3>Coding Standards</h3>
+                    <div class="project-standards-grid">
+                        <div class="project-form-group">
+                            <label>Naming Convention</label>
+                            <input type="text" id="stdNaming" placeholder="camelCase, PascalCase..." />
+                        </div>
+                        <div class="project-form-group">
+                            <label>File Structure</label>
+                            <input type="text" id="stdFileStructure" placeholder="Feature-based, layered..." />
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="project-modal-footer">
+                <div class="project-info">
+                    📁 Saved in: <code>.claude/project.json</code>
+                </div>
+                <div class="project-footer-actions">
+                    <button class="project-reset-btn" id="projectResetBtn">Reset</button>
+                    <button class="project-save-btn" id="projectSaveBtn">Save</button>
                 </div>
             </div>
         </div>

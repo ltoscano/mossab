@@ -631,6 +631,158 @@ app.get('/api/questions/stats', (req, res) => {
 });
 
 /**
+ * PROJECT CONTEXT ENDPOINTS
+ * Gestione configurazione progetto (.claude/project.json)
+ */
+
+/**
+ * GET /api/project/context
+ * Ottieni project context corrente
+ */
+app.get('/api/project/context', async (req, res) => {
+    if (!claudeService || !claudeService.projectContextManager) {
+        return res.json({
+            instructions: '',
+            preferences: {},
+            standards: {}
+        });
+    }
+
+    try {
+        const context = await claudeService.projectContextManager.getProjectContext();
+        res.json(context);
+    } catch (error) {
+        console.error('Error getting project context:', error);
+        res.status(500).json({
+            error: 'Failed to get project context',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * PUT /api/project/context
+ * Aggiorna project context
+ */
+app.put('/api/project/context', async (req, res) => {
+    if (!claudeService || !claudeService.projectContextManager) {
+        return res.status(503).json({
+            error: 'Project context system not available'
+        });
+    }
+
+    try {
+        const updates = req.body;
+        const updated = await claudeService.projectContextManager.updateProjectContext(updates);
+
+        // Refresh cache nel ClaudeService
+        claudeService.cachedProjectContextAddition =
+            await claudeService.projectContextManager.getSystemPromptAddition();
+
+        res.json({
+            success: true,
+            message: 'Project context updated successfully',
+            context: updated
+        });
+    } catch (error) {
+        console.error('Error updating project context:', error);
+        res.status(500).json({
+            error: 'Failed to update project context',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * DELETE /api/project/context
+ * Reset project context ai defaults
+ */
+app.delete('/api/project/context', async (req, res) => {
+    if (!claudeService || !claudeService.projectContextManager) {
+        return res.status(503).json({
+            error: 'Project context system not available'
+        });
+    }
+
+    try {
+        const reset = await claudeService.projectContextManager.resetProjectContext();
+
+        // Refresh cache
+        claudeService.cachedProjectContextAddition =
+            await claudeService.projectContextManager.getSystemPromptAddition();
+
+        res.json({
+            success: true,
+            message: 'Project context reset to defaults',
+            context: reset
+        });
+    } catch (error) {
+        console.error('Error resetting project context:', error);
+        res.status(500).json({
+            error: 'Failed to reset project context',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/project/templates
+ * Ottieni templates disponibili
+ */
+app.get('/api/project/templates', (req, res) => {
+    if (!claudeService || !claudeService.projectContextManager) {
+        return res.json({
+            templates: {}
+        });
+    }
+
+    try {
+        const templates = claudeService.projectContextManager.getTemplates();
+        res.json({ templates });
+    } catch (error) {
+        console.error('Error getting templates:', error);
+        res.status(500).json({
+            error: 'Failed to get templates',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/project/template/:templateName
+ * Applica un template
+ */
+app.post('/api/project/template/:templateName', async (req, res) => {
+    if (!claudeService || !claudeService.projectContextManager) {
+        return res.status(503).json({
+            error: 'Project context system not available'
+        });
+    }
+
+    const { templateName } = req.params;
+
+    try {
+        const context = await claudeService.projectContextManager.applyTemplate(templateName);
+
+        // Refresh cache
+        claudeService.cachedProjectContextAddition =
+            await claudeService.projectContextManager.getSystemPromptAddition();
+
+        res.json({
+            success: true,
+            message: `Template "${templateName}" applied successfully`,
+            context: context
+        });
+    } catch (error) {
+        console.error('Error applying template:', error);
+        res.status(400).json({
+            error: 'Failed to apply template',
+            message: error.message
+        });
+    }
+});
+
+/**
  * CONTEXT MANAGEMENT ENDPOINTS
  * Gestione context window e automatic summarization
  */

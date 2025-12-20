@@ -5,6 +5,7 @@ const WebTools = require('./web-tools');
 const UserQuestionManager = require('./user-question-manager');
 const MCPManager = require('./mcp-manager');
 const ContextManager = require('./context-manager');
+const ProjectContextManager = require('./project-context-manager');
 
 /**
  * Claude Service - Gestisce l'integrazione con l'API di Claude
@@ -53,6 +54,19 @@ class ClaudeService {
 
         // Esponi client Anthropic per ContextManager (per summarization)
         this.anthropic = this.client;
+
+        // Project Context Manager per preferenze e istruzioni del progetto
+        this.projectContextManager = new ProjectContextManager(workspaceRoot);
+        this.cachedProjectContextAddition = '';
+
+        // Initialize e cache project context
+        this.projectContextManager.initialize()
+            .then(async () => {
+                this.cachedProjectContextAddition = await this.projectContextManager.getSystemPromptAddition();
+            })
+            .catch(err => {
+                console.error('⚠️ ProjectContextManager initialization failed:', err);
+            });
     }
 
     /**
@@ -164,7 +178,8 @@ Esempio TODO:
 
 Ricorda: Il tuo obiettivo è essere il miglior assistente di programmazione possibile,
 aiutando gli sviluppatori a scrivere codice migliore, più velocemente.
-Usa i tool per operare CONCRETAMENTE sui file, non limitarti a suggerire!`;
+Usa i tool per operare CONCRETAMENTE sui file, non limitarti a suggerire!
+${this.cachedProjectContextAddition}`;
     }
 
     /**

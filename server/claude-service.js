@@ -3,6 +3,7 @@ const FilesystemTools = require('./filesystem-tools');
 const SkillManager = require('./skill-manager');
 const WebTools = require('./web-tools');
 const UserQuestionManager = require('./user-question-manager');
+const MCPManager = require('./mcp-manager');
 
 /**
  * Claude Service - Gestisce l'integrazione con l'API di Claude
@@ -39,6 +40,12 @@ class ClaudeService {
 
         // User Question Manager per ask_user_question tool
         this.userQuestionManager = new UserQuestionManager();
+
+        // MCP Manager per connessioni a MCP servers esterni
+        this.mcpManager = new MCPManager(workspaceRoot);
+        this.mcpManager.initialize().catch(err => {
+            console.error('⚠️ MCPManager initialization failed:', err);
+        });
     }
 
     /**
@@ -351,8 +358,11 @@ Usa i tool per operare CONCRETAMENTE sui file, non limitarti a suggerire!`;
             }
         ];
 
+        // MCP tools (da server esterni)
+        const mcpTools = this.mcpManager.getToolDefinitions();
+
         // Combina tutti i tool
-        return [...filesystemTools, ...webTools, ...interactionTools, ...legacyTools, ...skillTools];
+        return [...filesystemTools, ...webTools, ...interactionTools, ...legacyTools, ...skillTools, ...mcpTools];
     }
 
     /**
@@ -365,6 +375,19 @@ Usa i tool per operare CONCRETAMENTE sui file, non limitarti a suggerire!`;
         const filesystemToolNames = ['read_file', 'write_file', 'edit_file', 'glob', 'grep', 'bash', 'todo_write'];
         if (filesystemToolNames.includes(toolName)) {
             return await this.filesystemTools.executeTool(toolName, toolInput);
+        }
+
+        // Tool MCP (formato: serverName__toolName)
+        if (toolName.includes('__')) {
+            try {
+                return await this.mcpManager.executeTool(toolName, toolInput);
+            } catch (error) {
+                return {
+                    error: 'MCP tool execution failed',
+                    message: error.message,
+                    toolName: toolName
+                };
+            }
         }
 
         // Web tools

@@ -33,6 +33,18 @@ class MossabChat {
         this.skillsList = document.getElementById('skillsList');
         this.skillsReloadBtn = document.getElementById('skillsReloadBtn');
 
+        // Question modal elements
+        this.questionModal = document.getElementById('questionModal');
+        this.questionContext = document.getElementById('questionContext');
+        this.questionText = document.getElementById('questionText');
+        this.questionSuggestedAnswers = document.getElementById('questionSuggestedAnswers');
+        this.questionAnswerInput = document.getElementById('questionAnswerInput');
+        this.questionSubmitBtn = document.getElementById('questionSubmitBtn');
+        this.questionCancelBtn = document.getElementById('questionCancelBtn');
+
+        this.currentQuestionId = null;
+        this.questionPollInterval = null;
+
         this.init();
     }
 
@@ -69,6 +81,16 @@ class MossabChat {
         this.skillsModalOverlay.addEventListener('click', () => this.closeSkillsModal());
         this.skillsReloadBtn.addEventListener('click', () => this.reloadSkills());
 
+        // Question modal event listeners
+        this.questionSubmitBtn.addEventListener('click', () => this.submitAnswer());
+        this.questionCancelBtn.addEventListener('click', () => this.cancelQuestion());
+        this.questionAnswerInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && e.ctrlKey) {
+                e.preventDefault();
+                this.submitAnswer();
+            }
+        });
+
         // Quick action cards
         const quickActionCards = document.querySelectorAll('.quick-action-card');
         quickActionCards.forEach(card => {
@@ -84,6 +106,9 @@ class MossabChat {
 
         // Start TODO polling
         this.startTodoPolling();
+
+        // Start question polling
+        this.startQuestionPolling();
     }
 
     /**
@@ -554,6 +579,169 @@ class MossabChat {
         this.messageInput.value = `Per favore usa la skill "${skillName}" per aiutarmi`;
         this.closeSkillsModal();
         this.messageInput.focus();
+    }
+
+    /**
+     * QUESTION SYSTEM METHODS
+     */
+
+    /**
+     * Avvia il polling per controllare domande pendenti
+     */
+    startQuestionPolling() {
+        // Check ogni 2 secondi
+        this.questionPollInterval = setInterval(() => {
+            this.checkPendingQuestions();
+        }, 2000);
+
+        // Initial check
+        this.checkPendingQuestions();
+    }
+
+    /**
+     * Controlla se ci sono domande pendenti
+     */
+    async checkPendingQuestions() {
+        // Solo se non c'è già una domanda aperta
+        if (this.currentQuestionId) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/questions?sessionId=${this.sessionId}`);
+            const data = await response.json();
+
+            if (data.questions && data.questions.length > 0) {
+                // Mostra la prima domanda
+                this.showQuestion(data.questions[0]);
+            }
+
+        } catch (error) {
+            console.error('Error checking questions:', error);
+        }
+    }
+
+    /**
+     * Mostra una domanda all'utente
+     */
+    showQuestion(question) {
+        this.currentQuestionId = question.questionId;
+
+        // Popola il modal
+        if (question.context) {
+            this.questionContext.textContent = `📝 Contesto: ${question.context}`;
+            this.questionContext.style.display = 'block';
+        } else {
+            this.questionContext.style.display = 'none';
+        }
+
+        this.questionText.textContent = question.question;
+
+        // Suggested answers
+        if (question.suggestedAnswers && question.suggestedAnswers.length > 0) {
+            let html = '<div class="suggested-answers-title">Risposte suggerite:</div>';
+            question.suggestedAnswers.forEach((answer, index) => {
+                html += `<button class="suggested-answer-btn" onclick="app.selectSuggestedAnswer('${answer.replace(/'/g, "\\'")}')">${index + 1}. ${answer}</button>`;
+            });
+            this.questionSuggestedAnswers.innerHTML = html;
+            this.questionSuggestedAnswers.style.display = 'block';
+        } else {
+            this.questionSuggestedAnswers.style.display = 'none';
+        }
+
+        // Reset input
+        this.questionAnswerInput.value = '';
+
+        // Mostra modal
+        this.questionModal.classList.remove('hidden');
+        this.questionAnswerInput.focus();
+    }
+
+    /**
+     * Seleziona una risposta suggerita
+     */
+    selectSuggestedAnswer(answer) {
+        this.questionAnswerInput.value = answer;
+        this.questionAnswerInput.focus();
+    }
+
+    /**
+     * Invia la risposta
+     */
+    async submitAnswer() {
+        const answer = this.questionAnswerInput.value.trim();
+
+        if (!answer) {
+            alert('Per favore scrivi una risposta');
+            return;
+        }
+
+        try {
+            this.questionSubmitBtn.disabled = true;
+            this.questionSubmitBtn.textContent = 'Inviando...';
+
+            const response = await fetch(`/api/questions/${this.currentQuestionId}/answer`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ answer })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                console.log('✅ Answer submitted');
+                this.closeQuestionModal();
+            } else {
+                alert(`Errore: ${data.error}`);
+            }
+
+        } catch (error) {
+            console.error('Error submitting answer:', error);
+            alert('Errore nell\'invio della risposta');
+        } finally {
+            this.questionSubmitBtn.disabled = false;
+            this.questionSubmitBtn.textContent = 'Rispondi';
+        }
+    }
+
+    /**
+     * Cancella la domanda (salta)
+     */
+    async cancelQuestion() {
+        if (!confirm('Vuoi saltare questa domanda? Mossab procederà senza questa informazione.')) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/questions/${this.currentQuestionId}/cancel`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                console.log('❌ Question cancelled');
+                this.closeQuestionModal();
+            }
+
+        } catch (error) {
+            console.error('Error cancelling question:', error);
+            alert('Errore nella cancellazione');
+        }
+    }
+
+    /**
+     * Chiudi il modal delle domande
+     */
+    closeQuestionModal() {
+        this.questionModal.classList.add('hidden');
+        this.currentQuestionId = null;
+        this.questionAnswerInput.value = '';
     }
 }
 

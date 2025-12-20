@@ -175,6 +175,31 @@
         </div>
     </div>
 
+    <!-- Question Modal (Mossab asks the user) -->
+    <div class="question-modal hidden" id="questionModal">
+        <div class="question-modal-overlay"></div>
+        <div class="question-modal-content">
+            <div class="question-modal-header">
+                <h3>❓ Mossab ha una domanda</h3>
+            </div>
+            <div class="question-modal-body">
+                <div class="question-context" id="questionContext"></div>
+                <div class="question-text" id="questionText"></div>
+                <div class="question-suggested-answers" id="questionSuggestedAnswers"></div>
+                <textarea
+                    class="question-answer-input"
+                    id="questionAnswerInput"
+                    placeholder="Scrivi la tua risposta qui..."
+                    rows="3"
+                ></textarea>
+            </div>
+            <div class="question-modal-footer">
+                <button class="question-cancel-btn" id="questionCancelBtn">Salta</button>
+                <button class="question-submit-btn" id="questionSubmitBtn">Rispondi</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Skills Modal -->
     <div class="skills-modal hidden" id="skillsModal">
         <div class="skills-modal-overlay" id="skillsModalOverlay"></div>

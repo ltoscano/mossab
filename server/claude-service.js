@@ -1,6 +1,8 @@
 const Anthropic = require('@anthropic-ai/sdk');
 const FilesystemTools = require('./filesystem-tools');
 const SkillManager = require('./skill-manager');
+const WebTools = require('./web-tools');
+const UserQuestionManager = require('./user-question-manager');
 
 /**
  * Claude Service - Gestisce l'integrazione con l'API di Claude
@@ -31,6 +33,12 @@ class ClaudeService {
         this.skillManager.initialize().catch(err => {
             console.error('⚠️ SkillManager initialization failed:', err);
         });
+
+        // Web Tools per web search e web fetch
+        this.webTools = new WebTools();
+
+        // User Question Manager per ask_user_question tool
+        this.userQuestionManager = new UserQuestionManager();
     }
 
     /**
@@ -178,22 +186,79 @@ Usa i tool per operare CONCRETAMENTE sui file, non limitarti a suggerire!`;
         // Tool filesystem (Read, Write, Edit, Glob, Grep, Bash, TODO)
         const filesystemTools = this.filesystemTools.getToolDefinitions();
 
-        // Tool legacy (web_search, code_analyzer, ecc.)
-        const legacyTools = [
+        // Web tools (search, fetch)
+        const webTools = [
             {
                 name: 'web_search',
-                description: 'Cerca informazioni su internet. Usa questo tool quando hai bisogno di informazioni aggiornate, documentazione, o risorse non incluse nella tua knowledge base.',
+                description: 'Cerca informazioni su internet usando un motore di ricerca. Usa questo tool quando hai bisogno di informazioni aggiornate, documentazione tecnica, news recenti, o risorse non incluse nella tua knowledge base. Restituisce titoli, snippets e URL dei risultati.',
                 input_schema: {
                     type: 'object',
                     properties: {
                         query: {
                             type: 'string',
-                            description: 'La query di ricerca'
+                            description: 'La query di ricerca (es: "React hooks tutorial 2025", "Node.js best practices")'
+                        },
+                        num_results: {
+                            type: 'number',
+                            description: 'Numero di risultati da restituire (default: 5, max: 10)',
+                            default: 5
                         }
                     },
                     required: ['query']
                 }
             },
+            {
+                name: 'web_fetch',
+                description: 'Recupera il contenuto completo di una pagina web dato il suo URL. Usa questo tool per leggere documentazione online, articoli, API reference, o qualsiasi contenuto web. Il contenuto viene convertito in testo leggibile.',
+                input_schema: {
+                    type: 'object',
+                    properties: {
+                        url: {
+                            type: 'string',
+                            description: 'L\'URL completo della pagina da recuperare (es: "https://nodejs.org/api/fs.html")'
+                        },
+                        extract_main_content: {
+                            type: 'boolean',
+                            description: 'Se true, estrae solo il contenuto principale ignorando header/footer/ads (default: true)',
+                            default: true
+                        }
+                    },
+                    required: ['url']
+                }
+            },
+        ];
+
+        // User interaction tool
+        const interactionTools = [
+            {
+                name: 'ask_user_question',
+                description: 'IMPORTANTE: Usa questo tool quando hai bisogno di chiarimenti dall\'utente prima di procedere. Fai una domanda specifica e aspetta la risposta. Usa questo quando: (1) requisiti ambigui che richiedono scelta, (2) multiple implementazioni possibili e vuoi conferma, (3) informazioni mancanti che solo l\'utente può fornire. NON usare per domande retoriche o che puoi decidere tu.',
+                input_schema: {
+                    type: 'object',
+                    properties: {
+                        question: {
+                            type: 'string',
+                            description: 'La domanda da fare all\'utente. Sii specifico e chiaro. Se ci sono opzioni, elencale. Esempio: "Quale sistema di autenticazione preferisci? 1) JWT tokens 2) Session-based 3) OAuth2"'
+                        },
+                        context: {
+                            type: 'string',
+                            description: 'Contesto opzionale per aiutare l\'utente a capire perché stai chiedendo'
+                        },
+                        suggested_answers: {
+                            type: 'array',
+                            description: 'Lista opzionale di risposte suggerite (se applicabile)',
+                            items: {
+                                type: 'string'
+                            }
+                        }
+                    },
+                    required: ['question']
+                }
+            }
+        ];
+
+        // Legacy tools (code_analyzer, task_planner, memory)
+        const legacyTools = [
             {
                 name: 'code_analyzer',
                 description: 'Analizza codice per trovare bug, code smells, security issues, e suggerire miglioramenti.',
@@ -287,7 +352,7 @@ Usa i tool per operare CONCRETAMENTE sui file, non limitarti a suggerire!`;
         ];
 
         // Combina tutti i tool
-        return [...filesystemTools, ...legacyTools, ...skillTools];
+        return [...filesystemTools, ...webTools, ...interactionTools, ...legacyTools, ...skillTools];
     }
 
     /**
@@ -302,17 +367,50 @@ Usa i tool per operare CONCRETAMENTE sui file, non limitarti a suggerire!`;
             return await this.filesystemTools.executeTool(toolName, toolInput);
         }
 
-        // Tool legacy (simulati)
+        // Web tools
         switch (toolName) {
             case 'web_search':
-                return {
-                    results: [
-                        {
-                            title: 'Risultato simulato',
-                            snippet: `Risultati per la ricerca: "${toolInput.query}". In produzione, questo userebbe un'API di ricerca reale.`
-                        }
-                    ]
-                };
+                return await this.webTools.webSearch(
+                    toolInput.query,
+                    toolInput.num_results || 5
+                );
+
+            case 'web_fetch':
+                return await this.webTools.webFetch(
+                    toolInput.url,
+                    toolInput.extract_main_content !== false
+                );
+
+            case 'ask_user_question':
+                // IMPORTANTE: Questo tool blocca fino a quando l'utente risponde
+                // La sessione deve essere gestita dal contesto della chiamata
+                const sessionId = this.currentSessionId || 'default';
+
+                try {
+                    const response = await this.userQuestionManager.askQuestion(
+                        toolInput.question,
+                        toolInput.context || null,
+                        toolInput.suggested_answers || null,
+                        sessionId
+                    );
+
+                    return {
+                        success: true,
+                        question: toolInput.question,
+                        answer: response.answer,
+                        timeout: response.timeout || false,
+                        cancelled: response.cancelled || false,
+                        questionId: response.questionId,
+                        message: `L'utente ha risposto: "${response.answer}"`
+                    };
+                } catch (error) {
+                    return {
+                        success: false,
+                        error: 'Failed to get user answer',
+                        message: error.message,
+                        question: toolInput.question
+                    };
+                }
 
             case 'code_analyzer':
                 return {

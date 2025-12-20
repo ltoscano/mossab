@@ -116,6 +116,9 @@ app.post('/api/chat', async (req, res) => {
         // Usa Claude Service se disponibile
         if (claudeService && process.env.ANTHROPIC_API_KEY) {
             try {
+                // Imposta il sessionId corrente per ask_user_question tool
+                claudeService.currentSessionId = sessionId;
+
                 response = await claudeService.sendMessage(
                     message,
                     conversationHistory.length > 0 ? conversationHistory : session.history,
@@ -478,6 +481,153 @@ app.get('/api/todos', (req, res) => {
             current_task: inProgress?.activeForm || null
         }
     });
+});
+
+/**
+ * USER QUESTIONS ENDPOINTS
+ * Gestione del tool ask_user_question per chiarire requisiti ambigui
+ */
+
+/**
+ * GET /api/questions
+ * Ottieni tutte le domande pendenti (o filtrate per sessionId)
+ */
+app.get('/api/questions', (req, res) => {
+    if (!claudeService || !claudeService.userQuestionManager) {
+        return res.json({
+            questions: [],
+            message: 'Question system not available'
+        });
+    }
+
+    const { sessionId } = req.query;
+
+    try {
+        const questions = claudeService.userQuestionManager.getPendingQuestions(sessionId);
+
+        res.json({
+            questions: questions,
+            count: questions.length
+        });
+
+    } catch (error) {
+        console.error('Error getting questions:', error);
+        res.status(500).json({
+            error: 'Failed to get questions',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/questions/:questionId/answer
+ * Rispondi a una domanda di Mossab
+ */
+app.post('/api/questions/:questionId/answer', (req, res) => {
+    if (!claudeService || !claudeService.userQuestionManager) {
+        return res.status(503).json({
+            error: 'Question system not available'
+        });
+    }
+
+    const { questionId } = req.params;
+    const { answer } = req.body;
+
+    if (!answer || typeof answer !== 'string') {
+        return res.status(400).json({
+            error: 'answer is required and must be a string'
+        });
+    }
+
+    try {
+        const result = claudeService.userQuestionManager.answerQuestion(questionId, answer);
+
+        if (result.success) {
+            res.json({
+                success: true,
+                message: 'Answer submitted successfully',
+                questionId: questionId
+            });
+        } else {
+            res.status(404).json({
+                success: false,
+                error: result.error
+            });
+        }
+
+    } catch (error) {
+        console.error('Error answering question:', error);
+        res.status(500).json({
+            error: 'Failed to answer question',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/questions/:questionId/cancel
+ * Cancella una domanda (l'utente non vuole rispondere)
+ */
+app.post('/api/questions/:questionId/cancel', (req, res) => {
+    if (!claudeService || !claudeService.userQuestionManager) {
+        return res.status(503).json({
+            error: 'Question system not available'
+        });
+    }
+
+    const { questionId } = req.params;
+
+    try {
+        const result = claudeService.userQuestionManager.cancelQuestion(questionId);
+
+        if (result.success) {
+            res.json({
+                success: true,
+                message: 'Question cancelled',
+                questionId: questionId
+            });
+        } else {
+            res.status(404).json({
+                success: false,
+                error: result.error
+            });
+        }
+
+    } catch (error) {
+        console.error('Error cancelling question:', error);
+        res.status(500).json({
+            error: 'Failed to cancel question',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/questions/stats
+ * Ottieni statistiche sulle domande
+ */
+app.get('/api/questions/stats', (req, res) => {
+    if (!claudeService || !claudeService.userQuestionManager) {
+        return res.json({
+            stats: null,
+            message: 'Question system not available'
+        });
+    }
+
+    try {
+        const stats = claudeService.userQuestionManager.getStats();
+
+        res.json({
+            stats: stats
+        });
+
+    } catch (error) {
+        console.error('Error getting question stats:', error);
+        res.status(500).json({
+            error: 'Failed to get stats',
+            message: error.message
+        });
+    }
 });
 
 /**

@@ -1,4 +1,5 @@
 const Anthropic = require('@anthropic-ai/sdk');
+const OpenAI = require('openai');
 const FilesystemTools = require('./filesystem-tools');
 const SkillManager = require('./skill-manager');
 const WebTools = require('./web-tools');
@@ -16,12 +17,50 @@ const PRTemplateManager = require('./pr-template-manager');
  */
 class ClaudeService {
     constructor(apiKey, workspaceRoot) {
-        this.client = new Anthropic({
-            apiKey: apiKey || process.env.ANTHROPIC_API_KEY,
-        });
-
-        this.model = process.env.AI_MODEL || 'claude-sonnet-4-5-20250929';
+        // Provider configuration: 'anthropic' (direct) or 'litellm' (proxy)
+        this.provider = process.env.AI_PROVIDER || 'anthropic';
         this.maxTokens = parseInt(process.env.MAX_TOKENS) || 8192;
+
+        // Initialize client based on provider
+        if (this.provider === 'litellm') {
+            // LiteLLM Proxy (OpenAI-compatible API)
+            this.client = new OpenAI({
+                apiKey: process.env.LITELLM_API_KEY || 'default',
+                baseURL: process.env.LITELLM_PROXY_URL || 'http://localhost:4000'
+            });
+            this.model = process.env.LITELLM_MODEL || 'claude-sonnet-4-5-20250929';
+
+            // Model routing for different task complexities
+            this.modelRouting = {
+                simple: process.env.LITELLM_MODEL_SIMPLE || this.model,
+                advanced: process.env.LITELLM_MODEL_ADVANCED || this.model,
+                fast: process.env.LITELLM_MODEL_FAST || this.model
+            };
+
+            console.log(`✅ LiteLLM Proxy configured: ${this.client.baseURL}`);
+            console.log(`   Default model: ${this.model}`);
+            console.log(`   Simple tasks: ${this.modelRouting.simple}`);
+            console.log(`   Advanced tasks: ${this.modelRouting.advanced}`);
+        } else {
+            // Anthropic Direct Connection
+            this.client = new Anthropic({
+                apiKey: apiKey || process.env.ANTHROPIC_API_KEY,
+            });
+            this.model = process.env.AI_MODEL || 'claude-sonnet-4-5-20250929';
+
+            console.log(`✅ Anthropic Direct configured`);
+            console.log(`   Model: ${this.model}`);
+        }
+
+        // Esponi anche client Anthropic per ContextManager (summarization)
+        // Se usiamo LiteLLM, creiamo un client Anthropic separato per summarization
+        if (this.provider === 'litellm' && process.env.ANTHROPIC_API_KEY) {
+            this.anthropic = new Anthropic({
+                apiKey: process.env.ANTHROPIC_API_KEY
+            });
+        } else {
+            this.anthropic = this.client;
+        }
 
         // Advanced features flags
         this.enableToolUse = process.env.ENABLE_TOOL_USE === 'true';
@@ -603,10 +642,144 @@ ${this.cachedProjectContextAddition}`;
     }
 
     /**
-     * Invia un messaggio a Claude e gestisce la risposta
-     * Include gestione di tool use, thinking, ecc.
+     * Conversion Helpers: Anthropic ↔ OpenAI formats
      */
-    async sendMessage(userMessage, conversationHistory = [], sessionId = 'default') {
+
+    /**
+     * Converte tools Anthropic format → OpenAI format
+     */
+    convertToolsToOpenAI(tools) {
+        if (!tools || tools.length === 0) return [];
+
+        return tools.map(tool => ({
+            type: 'function',
+            function: {
+                name: tool.name,
+                description: tool.description,
+                parameters: tool.input_schema
+            }
+        }));
+    }
+
+    /**
+     * Converte tool calls OpenAI → Anthropic format per execution
+     */
+    convertOpenAIToolCalls(toolCalls) {
+        if (!toolCalls) return [];
+
+        return toolCalls.map(call => ({
+            id: call.id,
+            name: call.function.name,
+            input: JSON.parse(call.function.arguments)
+        }));
+    }
+
+    /**
+     * Invia messaggio usando LiteLLM Proxy (OpenAI-compatible)
+     */
+    async sendMessageLiteLLM(userMessage, conversationHistory = [], sessionId = 'default', complexity = 'simple') {
+        try {
+            // Seleziona modello basato su complexity
+            const selectedModel = this.modelRouting?.[complexity] || this.model;
+
+            console.log(`🔄 LiteLLM Request (model: ${selectedModel}, complexity: ${complexity})`);
+
+            // Costruisci messaggi in formato OpenAI
+            const messages = [
+                { role: 'system', content: this.getSystemPrompt() },
+                ...conversationHistory.map(msg => ({
+                    role: msg.role,
+                    content: msg.content
+                })),
+                { role: 'user', content: userMessage }
+            ];
+
+            // Converti tools in formato OpenAI
+            const tools = this.convertToolsToOpenAI(this.getTools());
+
+            // Chiamata a LiteLLM (formato OpenAI)
+            const response = await this.client.chat.completions.create({
+                model: selectedModel,
+                messages: messages,
+                max_tokens: this.maxTokens,
+                temperature: 0.7,
+                tools: this.enableToolUse && tools.length > 0 ? tools : undefined
+            });
+
+            const choice = response.choices[0];
+            let finalResponse = choice.message.content || '';
+            const toolCalls = choice.message.tool_calls || [];
+
+            console.log('📥 LiteLLM Response:', {
+                model: response.model,
+                finishReason: choice.finish_reason,
+                toolCalls: toolCalls.length
+            });
+
+            // Se ci sono tool calls, eseguili
+            if (toolCalls.length > 0 && this.enableToolUse) {
+                const convertedToolUses = this.convertOpenAIToolCalls(toolCalls);
+                const toolResults = [];
+
+                for (const toolUse of convertedToolUses) {
+                    const result = await this.executeTool(toolUse.name, toolUse.input);
+                    toolResults.push({
+                        role: 'tool',
+                        tool_call_id: toolUse.id,
+                        content: JSON.stringify(result)
+                    });
+                }
+
+                // Follow-up con tool results
+                const followUpResponse = await this.client.chat.completions.create({
+                    model: selectedModel,
+                    messages: [
+                        ...messages,
+                        choice.message,
+                        ...toolResults
+                    ],
+                    max_tokens: this.maxTokens,
+                    temperature: 0.7
+                });
+
+                finalResponse += followUpResponse.choices[0].message.content || '';
+
+                return {
+                    message: finalResponse,
+                    thinking: null, // OpenAI doesn't support thinking mode
+                    toolsUsed: convertedToolUses.map(t => t.name),
+                    model: response.model,
+                    usage: {
+                        input_tokens: response.usage.prompt_tokens,
+                        output_tokens: response.usage.completion_tokens
+                    },
+                    provider: 'litellm'
+                };
+            }
+
+            // Nessun tool use
+            return {
+                message: finalResponse,
+                thinking: null,
+                toolsUsed: [],
+                model: response.model,
+                usage: {
+                    input_tokens: response.usage.prompt_tokens,
+                    output_tokens: response.usage.completion_tokens
+                },
+                provider: 'litellm'
+            };
+
+        } catch (error) {
+            console.error('❌ Error calling LiteLLM:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Invia messaggio usando Anthropic Direct
+     */
+    async sendMessageAnthropic(userMessage, conversationHistory = [], sessionId = 'default') {
         try {
             // Costruisci i messaggi per l'API
             let messages = [
@@ -707,7 +880,8 @@ ${this.cachedProjectContextAddition}`;
                 usage: {
                     input_tokens: response.usage.input_tokens,
                     output_tokens: response.usage.output_tokens
-                }
+                },
+                provider: 'anthropic'
             };
 
         } catch (error) {
@@ -722,6 +896,18 @@ ${this.cachedProjectContextAddition}`;
             }
 
             throw error;
+        }
+    }
+
+    /**
+     * Router principale per sendMessage
+     * Delega a Anthropic o LiteLLM basato su configurazione
+     */
+    async sendMessage(userMessage, conversationHistory = [], sessionId = 'default', complexity = 'simple') {
+        if (this.provider === 'litellm') {
+            return await this.sendMessageLiteLLM(userMessage, conversationHistory, sessionId, complexity);
+        } else {
+            return await this.sendMessageAnthropic(userMessage, conversationHistory, sessionId);
         }
     }
 

@@ -783,6 +783,351 @@ app.post('/api/project/template/:templateName', async (req, res) => {
 });
 
 /**
+ * GIT INTEGRATION ENDPOINTS
+ * Gestione Git, PR creation, Code Review automation
+ */
+
+/**
+ * GET /api/git/status
+ * Ottieni git status del repository
+ */
+app.get('/api/git/status', async (req, res) => {
+    if (!claudeService || !claudeService.gitToolsManager) {
+        return res.json({
+            success: false,
+            error: 'Git system not available'
+        });
+    }
+
+    try {
+        const status = await claudeService.gitToolsManager.getStatus();
+        res.json({
+            success: true,
+            status: status
+        });
+    } catch (error) {
+        console.error('Error getting git status:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get git status',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/git/diff
+ * Ottieni git diff con opzioni
+ */
+app.post('/api/git/diff', async (req, res) => {
+    if (!claudeService || !claudeService.gitToolsManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Git system not available'
+        });
+    }
+
+    try {
+        const options = req.body || {};
+        const diff = await claudeService.gitToolsManager.getDiff(options);
+        res.json({
+            success: true,
+            diff: diff
+        });
+    } catch (error) {
+        console.error('Error getting diff:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get diff',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/git/log
+ * Ottieni git log
+ */
+app.get('/api/git/log', async (req, res) => {
+    if (!claudeService || !claudeService.gitToolsManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Git system not available'
+        });
+    }
+
+    try {
+        const limit = parseInt(req.query.limit) || 10;
+        const branch = req.query.branch || null;
+
+        const log = await claudeService.gitToolsManager.getLog({ limit, branch });
+        res.json({
+            success: true,
+            commits: log
+        });
+    } catch (error) {
+        console.error('Error getting log:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get log',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/git/commit
+ * Crea un commit
+ */
+app.post('/api/git/commit', async (req, res) => {
+    if (!claudeService || !claudeService.gitToolsManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Git system not available'
+        });
+    }
+
+    try {
+        const { message, files = [], all = false } = req.body;
+
+        if (!message) {
+            return res.status(400).json({
+                success: false,
+                error: 'Commit message is required'
+            });
+        }
+
+        const result = await claudeService.gitToolsManager.commit(message, { files, all });
+        res.json(result);
+    } catch (error) {
+        console.error('Error creating commit:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to create commit',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/git/push
+ * Push al remote
+ */
+app.post('/api/git/push', async (req, res) => {
+    if (!claudeService || !claudeService.gitToolsManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Git system not available'
+        });
+    }
+
+    try {
+        const options = req.body || {};
+        const result = await claudeService.gitToolsManager.push(options);
+        res.json(result);
+    } catch (error) {
+        console.error('Error pushing:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to push',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/pr/create
+ * Crea Pull Request con template
+ */
+app.post('/api/pr/create', async (req, res) => {
+    if (!claudeService || !claudeService.prTemplateManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'PR template system not available'
+        });
+    }
+
+    try {
+        const options = req.body || {};
+        const result = await claudeService.prTemplateManager.createPullRequest(options);
+        res.json(result);
+    } catch (error) {
+        console.error('Error creating PR:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to create PR',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/pr/generate-body
+ * Genera PR body con AI
+ */
+app.post('/api/pr/generate-body', async (req, res) => {
+    if (!claudeService || !claudeService.prTemplateManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'PR template system not available'
+        });
+    }
+
+    try {
+        const options = req.body || {};
+        const result = await claudeService.prTemplateManager.generatePRBody(options);
+        res.json(result);
+    } catch (error) {
+        console.error('Error generating PR body:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to generate PR body',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/pr/list
+ * Lista Pull Requests
+ */
+app.get('/api/pr/list', async (req, res) => {
+    if (!claudeService || !claudeService.gitToolsManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Git system not available'
+        });
+    }
+
+    try {
+        const state = req.query.state || 'open';
+        const limit = parseInt(req.query.limit) || 10;
+
+        const prs = await claudeService.gitToolsManager.listPullRequests({ state, limit });
+        res.json({
+            success: true,
+            pullRequests: prs
+        });
+    } catch (error) {
+        console.error('Error listing PRs:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to list PRs',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/pr/:number
+ * Visualizza PR specifica
+ */
+app.get('/api/pr/:number', async (req, res) => {
+    if (!claudeService || !claudeService.gitToolsManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Git system not available'
+        });
+    }
+
+    try {
+        const prNumber = parseInt(req.params.number);
+        const pr = await claudeService.gitToolsManager.getPullRequest(prNumber);
+        res.json({
+            success: true,
+            pullRequest: pr
+        });
+    } catch (error) {
+        console.error('Error getting PR:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get PR',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/review/code
+ * Esegui code review automatico
+ */
+app.post('/api/review/code', async (req, res) => {
+    if (!claudeService || !claudeService.codeReviewer) {
+        return res.status(503).json({
+            success: false,
+            error: 'Code review system not available'
+        });
+    }
+
+    try {
+        const options = req.body || {};
+        const result = await claudeService.codeReviewer.reviewCode(options);
+        res.json(result);
+    } catch (error) {
+        console.error('Error during code review:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to perform code review',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/review/security
+ * Esegui security scan
+ */
+app.post('/api/review/security', async (req, res) => {
+    if (!claudeService || !claudeService.codeReviewer) {
+        return res.status(503).json({
+            success: false,
+            error: 'Code review system not available'
+        });
+    }
+
+    try {
+        const options = req.body || {};
+        const result = await claudeService.codeReviewer.securityScan(options);
+        res.json(result);
+    } catch (error) {
+        console.error('Error during security scan:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to perform security scan',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/pr/templates
+ * Lista template PR disponibili
+ */
+app.get('/api/pr/templates', async (req, res) => {
+    if (!claudeService || !claudeService.prTemplateManager) {
+        return res.json({
+            success: true,
+            templates: []
+        });
+    }
+
+    try {
+        const templates = await claudeService.prTemplateManager.listTemplates();
+        res.json({
+            success: true,
+            templates: templates
+        });
+    } catch (error) {
+        console.error('Error listing templates:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to list templates',
+            message: error.message
+        });
+    }
+});
+
+/**
  * CONTEXT MANAGEMENT ENDPOINTS
  * Gestione context window e automatic summarization
  */

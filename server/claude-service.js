@@ -6,6 +6,9 @@ const UserQuestionManager = require('./user-question-manager');
 const MCPManager = require('./mcp-manager');
 const ContextManager = require('./context-manager');
 const ProjectContextManager = require('./project-context-manager');
+const GitToolsManager = require('./git-tools-manager');
+const CodeReviewer = require('./code-reviewer');
+const PRTemplateManager = require('./pr-template-manager');
 
 /**
  * Claude Service - Gestisce l'integrazione con l'API di Claude
@@ -67,6 +70,21 @@ class ClaudeService {
             .catch(err => {
                 console.error('⚠️ ProjectContextManager initialization failed:', err);
             });
+
+        // Git Tools Manager per operazioni Git avanzate
+        this.gitToolsManager = new GitToolsManager(workspaceRoot);
+        this.gitToolsManager.initialize().catch(err => {
+            console.error('⚠️ GitToolsManager initialization failed:', err);
+        });
+
+        // Code Reviewer per analisi automatica del codice
+        this.codeReviewer = new CodeReviewer(this.gitToolsManager);
+
+        // PR Template Manager per creazione PR con template
+        this.prTemplateManager = new PRTemplateManager(workspaceRoot, this.gitToolsManager);
+        this.prTemplateManager.initialize().catch(err => {
+            console.error('⚠️ PRTemplateManager initialization failed:', err);
+        });
     }
 
     /**
@@ -383,8 +401,23 @@ ${this.cachedProjectContextAddition}`;
         // MCP tools (da server esterni)
         const mcpTools = this.mcpManager.getToolDefinitions();
 
+        // Git tools (git operations, PR creation, code review)
+        const gitTools = this.gitToolsManager.getToolDefinitions();
+        const reviewTools = this.codeReviewer.getToolDefinitions();
+        const prTools = this.prTemplateManager.getToolDefinitions();
+
         // Combina tutti i tool
-        return [...filesystemTools, ...webTools, ...interactionTools, ...legacyTools, ...skillTools, ...mcpTools];
+        return [
+            ...filesystemTools,
+            ...webTools,
+            ...interactionTools,
+            ...legacyTools,
+            ...skillTools,
+            ...mcpTools,
+            ...gitTools,
+            ...reviewTools,
+            ...prTools
+        ];
     }
 
     /**
@@ -517,6 +550,27 @@ ${this.cachedProjectContextAddition}`;
                         available_skills: this.skillManager.listSkills()
                     };
                 }
+
+            // Git tools
+            case 'git_status':
+            case 'git_diff':
+            case 'git_log':
+            case 'git_create_pr':
+            case 'git_list_prs':
+            case 'git_view_pr':
+                return await this.gitToolsManager.executeTool(toolName, toolInput);
+
+            // Code review tools
+            case 'code_review':
+            case 'security_scan':
+            case 'review_file':
+                return await this.codeReviewer.executeTool(toolName, toolInput);
+
+            // PR template tools
+            case 'generate_pr_body':
+            case 'create_pr_with_template':
+            case 'list_pr_templates':
+                return await this.prTemplateManager.executeTool(toolName, toolInput);
 
             default:
                 return { error: 'Tool non riconosciuto' };

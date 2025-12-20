@@ -1,4 +1,5 @@
 const Anthropic = require('@anthropic-ai/sdk');
+const FormatHelpers = require('./format-helpers');
 
 /**
  * Code Reviewer
@@ -701,24 +702,33 @@ Provide ONLY the JSON response, no additional text.`;
      * Esegui un tool
      */
     async executeTool(toolName, toolInput) {
+        let result;
+        let formattedMessage = '';
+
         switch (toolName) {
             case 'code_review':
-                return await this.reviewCode({
+                result = await this.reviewCode({
                     prNumber: toolInput.pr_number,
                     branch: toolInput.branch,
                     files: toolInput.files,
                     staged: toolInput.staged
                 });
+                formattedMessage = FormatHelpers.formatCodeReview(result);
+                return { ...result, formatted_message: formattedMessage };
 
             case 'security_scan':
-                return await this.securityScan({
+                result = await this.securityScan({
                     prNumber: toolInput.pr_number,
                     branch: toolInput.branch,
                     staged: toolInput.staged
                 });
+                formattedMessage = FormatHelpers.formatSecurityScan(result);
+                return { ...result, formatted_message: formattedMessage };
 
             case 'review_file':
-                return await this.reviewFile(toolInput.file);
+                result = await this.reviewFile(toolInput.file);
+                formattedMessage = FormatHelpers.formatCodeReview(result);
+                return { ...result, formatted_message: formattedMessage };
 
             default:
                 throw new Error(`Unknown code review tool: ${toolName}`);

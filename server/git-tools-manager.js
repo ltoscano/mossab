@@ -1,6 +1,7 @@
 const { execSync } = require('child_process');
 const fs = require('fs').promises;
 const path = require('path');
+const FormatHelpers = require('./format-helpers');
 
 /**
  * Git Tools Manager
@@ -575,24 +576,46 @@ class GitToolsManager {
      * Esegui un tool git
      */
     async executeTool(toolName, toolInput) {
+        let result;
+        let formattedMessage = '';
+
         switch (toolName) {
             case 'git_status':
-                return await this.getStatus();
+                result = await this.getStatus();
+                formattedMessage = FormatHelpers.formatGitStatus(result);
+                return { ...result, formatted_message: formattedMessage };
 
             case 'git_diff':
-                return await this.getDiff(toolInput);
+                result = await this.getDiff(toolInput);
+                formattedMessage = FormatHelpers.formatDiffStats(result.stats);
+                if (result.files && result.files.length > 0) {
+                    formattedMessage += FormatHelpers.formatFileChanges(result.files);
+                }
+                formattedMessage += '\n' + FormatHelpers.formatDiff(result.diff, 100);
+                return { ...result, formatted_message: formattedMessage };
 
             case 'git_log':
-                return await this.getLog(toolInput);
+                result = await this.getLog(toolInput);
+                formattedMessage = FormatHelpers.formatCommitLog(result, toolInput.limit || 10);
+                return { commits: result, formatted_message: formattedMessage };
 
             case 'git_create_pr':
-                return await this.createPullRequest(toolInput);
+                result = await this.createPullRequest(toolInput);
+                formattedMessage = `✅ **Pull Request Created!**\n\n`;
+                formattedMessage += `**URL:** ${result.url}\n`;
+                formattedMessage += `**Title:** ${result.title}\n\n`;
+                formattedMessage += result.body || '';
+                return { ...result, formatted_message: formattedMessage };
 
             case 'git_list_prs':
-                return await this.listPullRequests(toolInput);
+                result = await this.listPullRequests(toolInput);
+                formattedMessage = FormatHelpers.formatPullRequestList(result, 15);
+                return { pullRequests: result, formatted_message: formattedMessage };
 
             case 'git_view_pr':
-                return await this.getPullRequest(toolInput.pr_number);
+                result = await this.getPullRequest(toolInput.pr_number);
+                formattedMessage = FormatHelpers.formatPullRequest(result);
+                return { ...result, formatted_message: formattedMessage };
 
             default:
                 throw new Error(`Unknown git tool: ${toolName}`);

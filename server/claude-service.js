@@ -146,6 +146,31 @@ ${this.enableMemory ? '✅ **Memoria**: Ricordi il contesto delle conversazioni 
 
 Hai accesso a questi tool per operare concretamente:
 
+## 📝 Importante: Presentazione Risultati
+
+Quando invochi tool Git, Code Review, o PR, il risultato include un campo **\`formatted_message\`**.
+Questo contiene output già formattato con:
+- Tabelle markdown
+- Syntax highlighting
+- Grafici ASCII
+- Progress bars
+- Emoji e icone
+
+**DEVI sempre mostrare \`formatted_message\` all'utente** invece di raw JSON.
+
+Esempio:
+\`\`\`
+[Invochi git_status tool]
+Result: {
+  branch: "main",
+  staged: [...],
+  formatted_message: "## 🌿 Git Status\\n\\n**Branch:** \`main\`..."
+}
+
+[Presenta all'utente:]
+formatted_message  ← Mostra questo, non il JSON!
+\`\`\`
+
 ## Filesystem Operations
 - **read_file**: Leggi file per esaminare codice esistente
 - **write_file**: Crea nuovi file o sovrascrivi esistenti

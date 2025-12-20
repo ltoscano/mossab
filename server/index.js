@@ -631,6 +631,204 @@ app.get('/api/questions/stats', (req, res) => {
 });
 
 /**
+ * MCP SERVER ENDPOINTS
+ * Gestione configurazione e connessioni MCP servers
+ */
+
+/**
+ * GET /api/mcp/servers
+ * Lista tutti i server MCP configurati
+ */
+app.get('/api/mcp/servers', async (req, res) => {
+    if (!claudeService || !claudeService.mcpManager) {
+        return res.json({
+            servers: [],
+            message: 'MCP system not available'
+        });
+    }
+
+    try {
+        const servers = await claudeService.mcpManager.listServers();
+
+        res.json({
+            servers: servers,
+            count: servers.length
+        });
+
+    } catch (error) {
+        console.error('Error listing MCP servers:', error);
+        res.status(500).json({
+            error: 'Failed to list servers',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/mcp/servers
+ * Aggiungi nuovo server MCP
+ */
+app.post('/api/mcp/servers', async (req, res) => {
+    if (!claudeService || !claudeService.mcpManager) {
+        return res.status(503).json({
+            error: 'MCP system not available'
+        });
+    }
+
+    const { name, url, bearerToken, description, enabled } = req.body;
+
+    if (!name || !url) {
+        return res.status(400).json({
+            error: 'name and url are required'
+        });
+    }
+
+    try {
+        await claudeService.mcpManager.addServerConfig({
+            name,
+            url,
+            bearerToken: bearerToken || '',
+            description: description || '',
+            enabled: enabled !== false
+        });
+
+        res.json({
+            success: true,
+            message: 'Server added successfully',
+            name: name
+        });
+
+    } catch (error) {
+        console.error('Error adding MCP server:', error);
+        res.status(500).json({
+            error: 'Failed to add server',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * PUT /api/mcp/servers/:name
+ * Aggiorna configurazione server
+ */
+app.put('/api/mcp/servers/:name', async (req, res) => {
+    if (!claudeService || !claudeService.mcpManager) {
+        return res.status(503).json({
+            error: 'MCP system not available'
+        });
+    }
+
+    const { name } = req.params;
+    const updates = req.body;
+
+    try {
+        await claudeService.mcpManager.updateServerConfig(name, updates);
+
+        res.json({
+            success: true,
+            message: 'Server updated successfully',
+            name: name
+        });
+
+    } catch (error) {
+        console.error('Error updating MCP server:', error);
+        res.status(500).json({
+            error: 'Failed to update server',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * DELETE /api/mcp/servers/:name
+ * Rimuovi server
+ */
+app.delete('/api/mcp/servers/:name', async (req, res) => {
+    if (!claudeService || !claudeService.mcpManager) {
+        return res.status(503).json({
+            error: 'MCP system not available'
+        });
+    }
+
+    const { name } = req.params;
+
+    try {
+        await claudeService.mcpManager.deleteServerConfig(name);
+
+        res.json({
+            success: true,
+            message: 'Server deleted successfully',
+            name: name
+        });
+
+    } catch (error) {
+        console.error('Error deleting MCP server:', error);
+        res.status(500).json({
+            error: 'Failed to delete server',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/mcp/reload
+ * Reload configurazione MCP
+ */
+app.post('/api/mcp/reload', async (req, res) => {
+    if (!claudeService || !claudeService.mcpManager) {
+        return res.status(503).json({
+            error: 'MCP system not available'
+        });
+    }
+
+    try {
+        await claudeService.mcpManager.reload();
+
+        const status = claudeService.mcpManager.getStatus();
+
+        res.json({
+            success: true,
+            message: 'MCP configuration reloaded',
+            status: status
+        });
+
+    } catch (error) {
+        console.error('Error reloading MCP:', error);
+        res.status(500).json({
+            error: 'Failed to reload',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/mcp/status
+ * Ottieni status connessioni MCP
+ */
+app.get('/api/mcp/status', (req, res) => {
+    if (!claudeService || !claudeService.mcpManager) {
+        return res.json({
+            totalServers: 0,
+            totalTools: 0,
+            servers: []
+        });
+    }
+
+    try {
+        const status = claudeService.mcpManager.getStatus();
+
+        res.json(status);
+
+    } catch (error) {
+        console.error('Error getting MCP status:', error);
+        res.status(500).json({
+            error: 'Failed to get status',
+            message: error.message
+        });
+    }
+});
+
+/**
  * AGENT SKILLS ENDPOINTS
  * Gestione delle skills seguendo lo standard agentskills.io
  */

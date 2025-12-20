@@ -33,6 +33,20 @@ class MossabChat {
         this.skillsList = document.getElementById('skillsList');
         this.skillsReloadBtn = document.getElementById('skillsReloadBtn');
 
+        // MCP modal elements
+        this.mcpBtn = document.getElementById('mcpBtn');
+        this.mcpModal = document.getElementById('mcpModal');
+        this.mcpModalClose = document.getElementById('mcpModalClose');
+        this.mcpModalOverlay = document.getElementById('mcpModalOverlay');
+        this.mcpServersList = document.getElementById('mcpServersList');
+        this.mcpStatusServers = document.getElementById('mcpStatusServers');
+        this.mcpStatusTools = document.getElementById('mcpStatusTools');
+        this.mcpAddBtn = document.getElementById('mcpAddBtn');
+        this.mcpReloadBtn = document.getElementById('mcpReloadBtn');
+        this.mcpAddForm = document.getElementById('mcpAddForm');
+        this.mcpCancelAddBtn = document.getElementById('mcpCancelAddBtn');
+        this.mcpSubmitAddBtn = document.getElementById('mcpSubmitAddBtn');
+
         // Question modal elements
         this.questionModal = document.getElementById('questionModal');
         this.questionContext = document.getElementById('questionContext');
@@ -80,6 +94,15 @@ class MossabChat {
         this.skillsModalClose.addEventListener('click', () => this.closeSkillsModal());
         this.skillsModalOverlay.addEventListener('click', () => this.closeSkillsModal());
         this.skillsReloadBtn.addEventListener('click', () => this.reloadSkills());
+
+        // MCP modal event listeners
+        this.mcpBtn.addEventListener('click', () => this.openMCPModal());
+        this.mcpModalClose.addEventListener('click', () => this.closeMCPModal());
+        this.mcpModalOverlay.addEventListener('click', () => this.closeMCPModal());
+        this.mcpAddBtn.addEventListener('click', () => this.showMCPAddForm());
+        this.mcpReloadBtn.addEventListener('click', () => this.reloadMCP());
+        this.mcpCancelAddBtn.addEventListener('click', () => this.hideMCPAddForm());
+        this.mcpSubmitAddBtn.addEventListener('click', () => this.submitMCPServer());
 
         // Question modal event listeners
         this.questionSubmitBtn.addEventListener('click', () => this.submitAnswer());
@@ -579,6 +602,292 @@ class MossabChat {
         this.messageInput.value = `Per favore usa la skill "${skillName}" per aiutarmi`;
         this.closeSkillsModal();
         this.messageInput.focus();
+    }
+
+    /**
+     * MCP SERVERS MODAL METHODS
+     */
+
+    /**
+     * Apri il modal MCP
+     */
+    async openMCPModal() {
+        this.mcpModal.classList.remove('hidden');
+        await this.loadMCPStatus();
+        await this.loadMCPServers();
+    }
+
+    /**
+     * Chiudi il modal MCP
+     */
+    closeMCPModal() {
+        this.mcpModal.classList.add('hidden');
+        this.hideMCPAddForm();
+    }
+
+    /**
+     * Carica lo status MCP (servers connessi, tools disponibili)
+     */
+    async loadMCPStatus() {
+        try {
+            const response = await fetch('/api/mcp/status');
+            const data = await response.json();
+
+            this.mcpStatusServers.textContent = data.totalServers || 0;
+            this.mcpStatusTools.textContent = data.totalTools || 0;
+
+        } catch (error) {
+            console.error('Error loading MCP status:', error);
+            this.mcpStatusServers.textContent = '0';
+            this.mcpStatusTools.textContent = '0';
+        }
+    }
+
+    /**
+     * Carica la lista dei server MCP
+     */
+    async loadMCPServers() {
+        try {
+            this.mcpServersList.innerHTML = '<div class="mcp-loading">Caricamento servers...</div>';
+
+            const [serversResponse, statusResponse] = await Promise.all([
+                fetch('/api/mcp/servers'),
+                fetch('/api/mcp/status')
+            ]);
+
+            const serversData = await serversResponse.json();
+            const statusData = await statusResponse.json();
+
+            if (!serversData.servers || serversData.servers.length === 0) {
+                this.mcpServersList.innerHTML = `
+                    <div class="mcp-empty">
+                        <p>Nessun server MCP configurato</p>
+                        <p class="mcp-hint">
+                            Clicca su "Aggiungi Server" per configurare il primo server MCP
+                        </p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Crea mappa dello status per server
+            const statusMap = {};
+            if (statusData.servers) {
+                statusData.servers.forEach(s => {
+                    statusMap[s.serverName] = s;
+                });
+            }
+
+            // Renderizza i server
+            let html = '';
+            for (const server of serversData.servers) {
+                const serverStatus = statusMap[server.name];
+                const isConnected = serverStatus && serverStatus.connected;
+                const toolsCount = serverStatus ? serverStatus.tools.length : 0;
+
+                html += `
+                    <div class="mcp-server-card">
+                        <div class="mcp-server-header">
+                            <span class="mcp-server-name">${server.name}</span>
+                            <span class="mcp-server-status ${isConnected ? 'connected' : 'disconnected'}">
+                                ${isConnected ? '● Connected' : '○ Disconnected'}
+                            </span>
+                        </div>
+                        <div class="mcp-server-url">${server.url}</div>
+                        ${server.description ? `<div class="mcp-server-description">${server.description}</div>` : ''}
+                        ${isConnected ? `<div class="mcp-server-tools">🛠️ ${toolsCount} tools disponibili</div>` : ''}
+                        <div class="mcp-server-actions">
+                            <button class="mcp-server-toggle" onclick="app.toggleMCPServer('${server.name}', ${server.enabled})">
+                                ${server.enabled ? 'Disabilita' : 'Abilita'}
+                            </button>
+                            <button class="mcp-server-delete" onclick="app.deleteMCPServer('${server.name}')">
+                                Elimina
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            this.mcpServersList.innerHTML = html;
+
+        } catch (error) {
+            console.error('Error loading MCP servers:', error);
+            this.mcpServersList.innerHTML = `
+                <div class="mcp-error">
+                    ⚠️ Errore nel caricamento dei server MCP
+                </div>
+            `;
+        }
+    }
+
+    /**
+     * Mostra il form per aggiungere un server
+     */
+    showMCPAddForm() {
+        this.mcpAddForm.classList.remove('hidden');
+        // Reset form
+        document.getElementById('mcpServerName').value = '';
+        document.getElementById('mcpServerUrl').value = '';
+        document.getElementById('mcpServerToken').value = '';
+        document.getElementById('mcpServerDescription').value = '';
+        document.getElementById('mcpServerEnabled').checked = true;
+    }
+
+    /**
+     * Nascondi il form per aggiungere un server
+     */
+    hideMCPAddForm() {
+        this.mcpAddForm.classList.add('hidden');
+    }
+
+    /**
+     * Submit nuovo server MCP
+     */
+    async submitMCPServer() {
+        const name = document.getElementById('mcpServerName').value.trim();
+        const url = document.getElementById('mcpServerUrl').value.trim();
+        const bearerToken = document.getElementById('mcpServerToken').value.trim();
+        const description = document.getElementById('mcpServerDescription').value.trim();
+        const enabled = document.getElementById('mcpServerEnabled').checked;
+
+        if (!name || !url) {
+            alert('Nome e URL sono obbligatori');
+            return;
+        }
+
+        try {
+            this.mcpSubmitAddBtn.disabled = true;
+            this.mcpSubmitAddBtn.textContent = 'Aggiungendo...';
+
+            const response = await fetch('/api/mcp/servers', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    name,
+                    url,
+                    bearerToken,
+                    description,
+                    enabled
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                console.log(`✅ Server MCP "${name}" aggiunto con successo`);
+                this.hideMCPAddForm();
+                await this.loadMCPStatus();
+                await this.loadMCPServers();
+            } else {
+                alert(`Errore: ${data.error || data.message || 'Operazione fallita'}`);
+            }
+
+        } catch (error) {
+            console.error('Error adding MCP server:', error);
+            alert('Errore nell\'aggiunta del server');
+        } finally {
+            this.mcpSubmitAddBtn.disabled = false;
+            this.mcpSubmitAddBtn.textContent = 'Aggiungi Server';
+        }
+    }
+
+    /**
+     * Toggle enabled/disabled di un server
+     */
+    async toggleMCPServer(serverName, currentEnabled) {
+        try {
+            const response = await fetch(`/api/mcp/servers/${serverName}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    enabled: !currentEnabled
+                })
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                console.log(`✅ Server "${serverName}" ${!currentEnabled ? 'abilitato' : 'disabilitato'}`);
+                await this.loadMCPStatus();
+                await this.loadMCPServers();
+            } else {
+                alert(`Errore: ${data.error || data.message}`);
+            }
+
+        } catch (error) {
+            console.error('Error toggling MCP server:', error);
+            alert('Errore nell\'aggiornamento del server');
+        }
+    }
+
+    /**
+     * Elimina un server MCP
+     */
+    async deleteMCPServer(serverName) {
+        if (!confirm(`Sei sicuro di voler eliminare il server "${serverName}"?`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch(`/api/mcp/servers/${serverName}`, {
+                method: 'DELETE'
+            });
+
+            const data = await response.json();
+
+            if (response.ok && data.success) {
+                console.log(`✅ Server "${serverName}" eliminato`);
+                await this.loadMCPStatus();
+                await this.loadMCPServers();
+            } else {
+                alert(`Errore: ${data.error || data.message}`);
+            }
+
+        } catch (error) {
+            console.error('Error deleting MCP server:', error);
+            alert('Errore nell\'eliminazione del server');
+        }
+    }
+
+    /**
+     * Reload configurazione MCP
+     */
+    async reloadMCP() {
+        try {
+            this.mcpReloadBtn.disabled = true;
+            this.mcpReloadBtn.textContent = 'Reloading...';
+
+            const response = await fetch('/api/mcp/reload', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                console.log('✅ MCP configuration reloaded');
+                await this.loadMCPStatus();
+                await this.loadMCPServers();
+            }
+
+        } catch (error) {
+            console.error('Error reloading MCP:', error);
+            alert('Errore nel reload della configurazione MCP');
+        } finally {
+            this.mcpReloadBtn.disabled = false;
+            this.mcpReloadBtn.innerHTML = `
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"></path>
+                </svg>
+                Reload
+            `;
+        }
     }
 
     /**

@@ -35,6 +35,13 @@
                     </div>
                 </div>
                 <div class="header-right">
+                    <button class="icon-btn" id="mcpBtn" title="MCP Servers">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                            <line x1="8" y1="21" x2="16" y2="21"></line>
+                            <line x1="12" y1="17" x2="12" y2="21"></line>
+                        </svg>
+                    </button>
                     <button class="icon-btn" id="skillsBtn" title="Agent Skills">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
@@ -227,6 +234,91 @@
                     </svg>
                     Reload Skills
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MCP Servers Modal -->
+    <div class="mcp-modal hidden" id="mcpModal">
+        <div class="mcp-modal-overlay" id="mcpModalOverlay"></div>
+        <div class="mcp-modal-content">
+            <div class="mcp-modal-header">
+                <h2>🔌 MCP Servers</h2>
+                <button class="mcp-modal-close" id="mcpModalClose">×</button>
+            </div>
+            <div class="mcp-modal-body">
+                <p class="mcp-description">
+                    Model Context Protocol (MCP) servers permettono a Mossab di connettersi a servizi esterni
+                    per ottenere nuovi tool e capabilities.
+                </p>
+
+                <!-- Status Overview -->
+                <div class="mcp-status" id="mcpStatus">
+                    <div class="mcp-status-item">
+                        <span class="mcp-status-label">Servers Connessi:</span>
+                        <span class="mcp-status-value" id="mcpStatusServers">0</span>
+                    </div>
+                    <div class="mcp-status-item">
+                        <span class="mcp-status-label">Tools Disponibili:</span>
+                        <span class="mcp-status-value" id="mcpStatusTools">0</span>
+                    </div>
+                </div>
+
+                <!-- Server List -->
+                <div id="mcpServersList" class="mcp-servers-list">
+                    <div class="mcp-loading">Caricamento servers...</div>
+                </div>
+
+                <!-- Add Server Form -->
+                <div class="mcp-add-form hidden" id="mcpAddForm">
+                    <h3>Aggiungi Nuovo Server</h3>
+                    <div class="mcp-form-group">
+                        <label for="mcpServerName">Nome Server *</label>
+                        <input type="text" id="mcpServerName" placeholder="my-server" required />
+                    </div>
+                    <div class="mcp-form-group">
+                        <label for="mcpServerUrl">URL Server *</label>
+                        <input type="text" id="mcpServerUrl" placeholder="https://api.example.com/mcp" required />
+                    </div>
+                    <div class="mcp-form-group">
+                        <label for="mcpServerToken">Bearer Token (opzionale)</label>
+                        <input type="password" id="mcpServerToken" placeholder="your_auth_token" />
+                    </div>
+                    <div class="mcp-form-group">
+                        <label for="mcpServerDescription">Descrizione (opzionale)</label>
+                        <textarea id="mcpServerDescription" rows="2" placeholder="Descrivi questo server..."></textarea>
+                    </div>
+                    <div class="mcp-form-group">
+                        <label class="mcp-checkbox-label">
+                            <input type="checkbox" id="mcpServerEnabled" checked />
+                            Abilita immediatamente
+                        </label>
+                    </div>
+                    <div class="mcp-form-actions">
+                        <button class="mcp-cancel-btn" id="mcpCancelAddBtn">Annulla</button>
+                        <button class="mcp-submit-btn" id="mcpSubmitAddBtn">Aggiungi Server</button>
+                    </div>
+                </div>
+            </div>
+            <div class="mcp-modal-footer">
+                <div class="mcp-info">
+                    📁 Config: <code>.claude/mcp-config.json</code>
+                </div>
+                <div class="mcp-footer-actions">
+                    <button class="mcp-reload-btn" id="mcpReloadBtn" title="Reload configurazione">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"></path>
+                        </svg>
+                        Reload
+                    </button>
+                    <button class="mcp-add-btn" id="mcpAddBtn">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                        Aggiungi Server
+                    </button>
+                </div>
             </div>
         </div>
     </div>

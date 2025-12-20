@@ -27,13 +27,21 @@ class FilesystemTools {
         return [
             {
                 name: 'read_file',
-                description: 'Legge il contenuto di un file. Usa questo tool quando devi esaminare codice esistente, leggere configurazioni, o analizzare file.',
+                description: 'Legge il contenuto di un file con numeri di riga. Supporta lettura parziale per file grandi. Usa questo tool quando devi esaminare codice esistente, leggere configurazioni, o analizzare file.',
                 input_schema: {
                     type: 'object',
                     properties: {
                         file_path: {
                             type: 'string',
                             description: 'Path del file da leggere (relativo al workspace)'
+                        },
+                        offset: {
+                            type: 'number',
+                            description: 'Numero di riga da cui iniziare (0-indexed). Ometti per leggere dall\'inizio.'
+                        },
+                        limit: {
+                            type: 'number',
+                            description: 'Numero massimo di righe da leggere. Ometti per leggere tutto il file. Usa questo per file grandi (es: limit=100 per prime 100 righe).'
                         }
                     },
                     required: ['file_path']
@@ -178,7 +186,11 @@ class FilesystemTools {
         try {
             switch (toolName) {
                 case 'read_file':
-                    return await this.readFile(toolInput.file_path);
+                    return await this.readFile(
+                        toolInput.file_path,
+                        toolInput.offset,
+                        toolInput.limit
+                    );
 
                 case 'write_file':
                     return await this.writeFile(toolInput.file_path, toolInput.content);
@@ -220,19 +232,35 @@ class FilesystemTools {
 
     /**
      * READ FILE
+     * Supporta offset e limit per lettura parziale di file grandi
      */
-    async readFile(filePath) {
+    async readFile(filePath, offset = null, limit = null) {
         const fullPath = path.join(this.workspaceRoot, filePath);
         const content = await fs.readFile(fullPath, 'utf-8');
 
-        // Simula output con numeri di riga (come Read tool)
+        // Split in righe
         const lines = content.split('\n');
-        const numbered = lines.map((line, i) => `${i + 1}→${line}`).join('\n');
+        const totalLines = lines.length;
+
+        // Determina range da leggere
+        const startLine = offset !== null && offset >= 0 ? offset : 0;
+        const endLine = limit !== null ? startLine + limit : totalLines;
+
+        // Slice delle righe richieste
+        const selectedLines = lines.slice(startLine, endLine);
+
+        // Numera le righe (1-indexed per l'output, ma offset è 0-indexed)
+        const numbered = selectedLines.map((line, i) =>
+            `${startLine + i + 1}→${line}`
+        ).join('\n');
 
         return {
             file_path: filePath,
             content: numbered,
-            lines: lines.length
+            lines: totalLines,
+            lines_shown: selectedLines.length,
+            offset: startLine,
+            showing_range: `${startLine + 1}-${startLine + selectedLines.length}`
         };
     }
 

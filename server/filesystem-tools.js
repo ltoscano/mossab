@@ -175,6 +175,52 @@ class FilesystemTools {
                 }
             }
         ];
+
+        // Conditionally add multi_edit tool if enabled
+        if (process.env.ENABLE_MULTI_EDIT === 'true') {
+            tools.push({
+                name: 'multi_edit',
+                description: '🔥 ATOMIC multi-file editing. Modifica multipli file in una transazione all-or-nothing con automatic rollback. Perfetto per refactoring cross-file (rename functions, update imports, restructure code). Se una edit fallisce, TUTTE vengono automaticamente annullate (rollback). Molto più sicuro che edit_file multipli.',
+                input_schema: {
+                    type: 'object',
+                    properties: {
+                        edits: {
+                            type: 'array',
+                            description: 'Array di modifiche da applicare atomicamente',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    file_path: {
+                                        type: 'string',
+                                        description: 'Path del file da modificare (relativo al workspace)'
+                                    },
+                                    old_string: {
+                                        type: 'string',
+                                        description: 'Stringa da sostituire (deve esistere esattamente)'
+                                    },
+                                    new_string: {
+                                        type: 'string',
+                                        description: 'Nuova stringa'
+                                    },
+                                    replace_all: {
+                                        type: 'boolean',
+                                        description: 'Se true, sostituisce tutte le occorrenze. Se false (default), solo la prima.'
+                                    }
+                                },
+                                required: ['file_path', 'old_string', 'new_string']
+                            }
+                        },
+                        dry_run: {
+                            type: 'boolean',
+                            description: 'Se true, mostra preview senza applicare le modifiche. Utile per verificare prima di eseguire. Default: false'
+                        }
+                    },
+                    required: ['edits']
+                }
+            });
+        }
+
+        return tools;
     }
 
     /**
@@ -217,6 +263,9 @@ class FilesystemTools {
 
                 case 'todo_write':
                     return await this.todoWrite(toolInput.todos);
+
+                case 'multi_edit':
+                    return await this.multiEdit(toolInput.edits, toolInput.dry_run);
 
                 default:
                     return { error: `Unknown tool: ${toolName}` };
@@ -308,6 +357,140 @@ class FilesystemTools {
             file_path: filePath,
             changes: 1
         };
+    }
+
+    /**
+     * MULTI EDIT - Modifica multipli file atomicamente
+     * All-or-nothing: se una edit fallisce, tutte vengono rollback
+     */
+    async multiEdit(edits, dryRun = false) {
+        console.log(`📝 Multi-edit: ${edits.length} files (dry-run: ${dryRun})`);
+
+        const backups = [];
+        const changes = [];
+
+        try {
+            // Phase 1: VALIDATION - Verifica che tutte le edit siano valide
+            console.log('🔍 Phase 1: Validation...');
+            for (const edit of edits) {
+                const { file_path, old_string, new_string, replace_all } = edit;
+                const fullPath = path.join(this.workspaceRoot, file_path);
+
+                // Check file exists
+                try {
+                    await fs.access(fullPath);
+                } catch {
+                    throw new Error(`File not found: ${file_path}`);
+                }
+
+                // Read and validate old_string exists
+                const content = await fs.readFile(fullPath, 'utf-8');
+
+                if (!content.includes(old_string)) {
+                    throw new Error(
+                        `String not found in ${file_path}: "${old_string.substring(0, 50)}${old_string.length > 50 ? '...' : ''}"`
+                    );
+                }
+
+                // Count occurrences
+                const occurrences = (content.match(new RegExp(old_string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length;
+
+                changes.push({
+                    file: file_path,
+                    occurrences: occurrences,
+                    replace_all: replace_all || false
+                });
+            }
+
+            console.log(`✅ Validation passed: ${edits.length} files ready`);
+
+            // If dry-run, return preview without applying
+            if (dryRun) {
+                return {
+                    success: true,
+                    dry_run: true,
+                    files: edits.length,
+                    changes: changes,
+                    message: 'Dry-run successful. No files were modified. Set dry_run=false to apply changes.'
+                };
+            }
+
+            // Phase 2: BACKUP - Salva contenuti originali
+            console.log('💾 Phase 2: Backup...');
+            for (const edit of edits) {
+                const fullPath = path.join(this.workspaceRoot, edit.file_path);
+                const content = await fs.readFile(fullPath, 'utf-8');
+                backups.push({
+                    file_path: edit.file_path,
+                    fullPath: fullPath,
+                    content: content
+                });
+            }
+
+            console.log(`✅ Backed up ${backups.length} files`);
+
+            // Phase 3: APPLY - Applica tutte le modifiche
+            console.log('✏️ Phase 3: Applying edits...');
+            let totalReplacements = 0;
+
+            for (let i = 0; i < edits.length; i++) {
+                const edit = edits[i];
+                const { file_path, old_string, new_string, replace_all } = edit;
+                const fullPath = path.join(this.workspaceRoot, file_path);
+
+                let content = await fs.readFile(fullPath, 'utf-8');
+
+                // Apply replacement
+                if (replace_all) {
+                    // Replace all occurrences
+                    const regex = new RegExp(old_string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+                    content = content.replace(regex, new_string);
+                } else {
+                    // Replace only first occurrence
+                    content = content.replace(old_string, new_string);
+                }
+
+                await fs.writeFile(fullPath, content, 'utf-8');
+                totalReplacements++;
+
+                console.log(`  ✓ ${file_path} (${changes[i].occurrences} occurrence${changes[i].occurrences > 1 ? 's' : ''})`);
+            }
+
+            console.log(`✅ Multi-edit successful: ${totalReplacements} files modified`);
+
+            return {
+                success: true,
+                files: totalReplacements,
+                changes: changes,
+                message: `Successfully modified ${totalReplacements} file(s) atomically`
+            };
+
+        } catch (error) {
+            // Phase 4: ROLLBACK - Ripristina tutti i file in caso di errore
+            console.error(`❌ Multi-edit failed: ${error.message}`);
+
+            if (backups.length > 0) {
+                console.log(`🔄 Rolling back ${backups.length} files...`);
+
+                for (const backup of backups) {
+                    try {
+                        await fs.writeFile(backup.fullPath, backup.content, 'utf-8');
+                        console.log(`  ↩️ Restored ${backup.file_path}`);
+                    } catch (rollbackError) {
+                        console.error(`  ❌ Failed to restore ${backup.file_path}: ${rollbackError.message}`);
+                    }
+                }
+
+                console.log(`✅ Rollback complete`);
+            }
+
+            return {
+                success: false,
+                error: error.message,
+                rolled_back: backups.length,
+                message: `Multi-edit failed and rolled back ${backups.length} file(s): ${error.message}`
+            };
+        }
     }
 
     /**

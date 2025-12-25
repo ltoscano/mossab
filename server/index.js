@@ -7,6 +7,8 @@ const ClaudeService = require('./claude-service');
 const StreamingManager = require('./streaming-manager');
 const AgentManager = require('./agent-manager');
 const WorkflowManager = require('./workflow-manager');
+const WebhookManager = require('./webhook-manager');
+const SchedulerManager = require('./scheduler-manager');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -60,6 +62,34 @@ try {
     });
 } catch (error) {
     console.warn('⚠️  Workflow Manager initialization failed:', error.message);
+}
+
+// Inizializza Webhook Manager per automatic triggers
+let webhookManager;
+try {
+    webhookManager = new WebhookManager(WORKSPACE_ROOT, agentManager, workflowManager);
+    // Initialize webhooks asynchronously
+    webhookManager.initialize().then(stats => {
+        console.log(`✅ Webhook Manager initialized - ${stats.total} webhooks available`);
+    }).catch(error => {
+        console.warn('⚠️  Webhook Manager initialization warning:', error.message);
+    });
+} catch (error) {
+    console.warn('⚠️  Webhook Manager initialization failed:', error.message);
+}
+
+// Inizializza Scheduler Manager per cron-based workflows
+let schedulerManager;
+try {
+    schedulerManager = new SchedulerManager(WORKSPACE_ROOT, workflowManager);
+    // Initialize schedules asynchronously
+    schedulerManager.initialize().then(stats => {
+        console.log(`✅ Scheduler Manager initialized - ${stats.total} schedules (${stats.active} active)`);
+    }).catch(error => {
+        console.warn('⚠️  Scheduler Manager initialization warning:', error.message);
+    });
+} catch (error) {
+    console.warn('⚠️  Scheduler Manager initialization failed:', error.message);
 }
 
 // Session storage (in produzione usare Redis o DB)
@@ -2218,6 +2248,623 @@ app.post('/api/workflows/reload', async (req, res) => {
         console.error('Error reloading workflows:', error);
         res.status(500).json({
             error: 'Failed to reload workflows',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * WEBHOOK SYSTEM ENDPOINTS
+ * Sistema di trigger automatici per eventi
+ */
+
+/**
+ * GET /api/webhooks
+ * Lista tutti i webhooks
+ */
+app.get('/api/webhooks', (req, res) => {
+    if (!webhookManager) {
+        return res.json({
+            webhooks: [],
+            message: 'Webhook system not available'
+        });
+    }
+
+    try {
+        const webhooks = webhookManager.listWebhooks();
+
+        res.json({
+            success: true,
+            webhooks: webhooks,
+            count: webhooks.length
+        });
+
+    } catch (error) {
+        console.error('Error listing webhooks:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to list webhooks',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/webhooks
+ * Crea nuovo webhook
+ */
+app.post('/api/webhooks', async (req, res) => {
+    if (!webhookManager) {
+        return res.status(503).json({
+            error: 'Webhook system not available'
+        });
+    }
+
+    try {
+        const config = req.body;
+
+        if (!config.name || !config.event || !config.action) {
+            return res.status(400).json({
+                error: 'name, event, and action are required',
+                example: {
+                    name: 'pre-commit-security',
+                    description: 'Run security audit on pre-commit',
+                    event: 'pre-commit',
+                    action: {
+                        type: 'workflow',
+                        target: 'code-quality'
+                    },
+                    conditions: {
+                        branch: 'main',
+                        files: '*.js'
+                    }
+                }
+            });
+        }
+
+        const result = await webhookManager.createWebhook(config);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error creating webhook:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to create webhook',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/webhooks/trigger/:id
+ * Trigger webhook manualmente o da evento
+ */
+app.post('/api/webhooks/trigger/:id', async (req, res) => {
+    if (!webhookManager) {
+        return res.status(503).json({
+            error: 'Webhook system not available'
+        });
+    }
+
+    try {
+        const { id } = req.params;
+        const payload = req.body;
+        const secret = req.headers['x-webhook-secret'];
+
+        const result = await webhookManager.triggerWebhook(id, payload, secret);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error triggering webhook:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to trigger webhook',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/webhooks/trigger-event
+ * Trigger tutti i webhooks per un evento
+ */
+app.post('/api/webhooks/trigger-event', async (req, res) => {
+    if (!webhookManager) {
+        return res.status(503).json({
+            error: 'Webhook system not available'
+        });
+    }
+
+    try {
+        const { event, payload = {} } = req.body;
+
+        if (!event) {
+            return res.status(400).json({
+                error: 'event is required'
+            });
+        }
+
+        const result = await webhookManager.triggerByEvent(event, payload);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error triggering event webhooks:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to trigger event webhooks',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * PUT /api/webhooks/:id
+ * Aggiorna webhook
+ */
+app.put('/api/webhooks/:id', async (req, res) => {
+    if (!webhookManager) {
+        return res.status(503).json({
+            error: 'Webhook system not available'
+        });
+    }
+
+    try {
+        const { id } = req.params;
+        const updates = req.body;
+
+        const result = await webhookManager.updateWebhook(id, updates);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error updating webhook:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to update webhook',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * DELETE /api/webhooks/:id
+ * Elimina webhook
+ */
+app.delete('/api/webhooks/:id', async (req, res) => {
+    if (!webhookManager) {
+        return res.status(503).json({
+            error: 'Webhook system not available'
+        });
+    }
+
+    try {
+        const { id } = req.params;
+
+        const result = await webhookManager.deleteWebhook(id);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error deleting webhook:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to delete webhook',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/webhooks/:id/toggle
+ * Abilita/disabilita webhook
+ */
+app.post('/api/webhooks/:id/toggle', async (req, res) => {
+    if (!webhookManager) {
+        return res.status(503).json({
+            error: 'Webhook system not available'
+        });
+    }
+
+    try {
+        const { id } = req.params;
+
+        const result = await webhookManager.toggleWebhook(id);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error toggling webhook:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to toggle webhook',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/webhooks/:id/script
+ * Genera script Git hook per webhook
+ */
+app.get('/api/webhooks/:id/script', (req, res) => {
+    if (!webhookManager) {
+        return res.status(503).json({
+            error: 'Webhook system not available'
+        });
+    }
+
+    try {
+        const { id } = req.params;
+        const { event } = req.query;
+
+        if (!event) {
+            return res.status(400).json({
+                error: 'event query parameter is required (e.g., ?event=pre-commit)'
+            });
+        }
+
+        const script = webhookManager.generateGitHookScript(id, event);
+
+        res.setHeader('Content-Type', 'text/plain');
+        res.setHeader('Content-Disposition', `attachment; filename="${event}.sh"`);
+        res.send(script);
+
+    } catch (error) {
+        console.error('Error generating hook script:', error);
+        res.status(400).json({
+            error: 'Failed to generate hook script',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/webhooks/history
+ * Ottieni history esecuzioni webhook
+ */
+app.get('/api/webhooks/history', (req, res) => {
+    if (!webhookManager) {
+        return res.json({
+            history: []
+        });
+    }
+
+    try {
+        const limit = parseInt(req.query.limit) || 50;
+        const history = webhookManager.getHistory(limit);
+
+        res.json({
+            success: true,
+            history: history,
+            count: history.length
+        });
+
+    } catch (error) {
+        console.error('Error getting webhook history:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get webhook history',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/webhooks/stats
+ * Ottieni statistiche webhooks
+ */
+app.get('/api/webhooks/stats', (req, res) => {
+    if (!webhookManager) {
+        return res.json({
+            stats: {
+                total: 0,
+                enabled: 0,
+                disabled: 0
+            }
+        });
+    }
+
+    try {
+        const stats = webhookManager.getStats();
+
+        res.json({
+            success: true,
+            stats: stats
+        });
+
+    } catch (error) {
+        console.error('Error getting webhook stats:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get webhook stats',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * SCHEDULER SYSTEM ENDPOINTS
+ * Sistema di cron-based workflow automation
+ */
+
+/**
+ * GET /api/schedules
+ * Lista tutti gli schedules
+ */
+app.get('/api/schedules', (req, res) => {
+    if (!schedulerManager) {
+        return res.json({
+            schedules: [],
+            message: 'Scheduler system not available'
+        });
+    }
+
+    try {
+        const schedules = schedulerManager.listSchedules();
+
+        res.json({
+            success: true,
+            schedules: schedules,
+            count: schedules.length
+        });
+
+    } catch (error) {
+        console.error('Error listing schedules:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to list schedules',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/schedules
+ * Crea nuovo schedule
+ */
+app.post('/api/schedules', async (req, res) => {
+    if (!schedulerManager) {
+        return res.status(503).json({
+            error: 'Scheduler system not available'
+        });
+    }
+
+    try {
+        const config = req.body;
+
+        if (!config.name || !config.workflow || (!config.cron && !config.interval)) {
+            return res.status(400).json({
+                error: 'name, workflow, and (cron or interval) are required',
+                example: {
+                    name: 'daily-security-scan',
+                    description: 'Run security scan daily',
+                    workflow: 'code-quality',
+                    cron: '0 0 * * *',
+                    context: {
+                        branch: 'main'
+                    }
+                }
+            });
+        }
+
+        const result = await schedulerManager.createSchedule(config);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error creating schedule:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to create schedule',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * PUT /api/schedules/:id
+ * Aggiorna schedule
+ */
+app.put('/api/schedules/:id', async (req, res) => {
+    if (!schedulerManager) {
+        return res.status(503).json({
+            error: 'Scheduler system not available'
+        });
+    }
+
+    try {
+        const { id } = req.params;
+        const updates = req.body;
+
+        const result = await schedulerManager.updateSchedule(id, updates);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error updating schedule:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to update schedule',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * DELETE /api/schedules/:id
+ * Elimina schedule
+ */
+app.delete('/api/schedules/:id', async (req, res) => {
+    if (!schedulerManager) {
+        return res.status(503).json({
+            error: 'Scheduler system not available'
+        });
+    }
+
+    try {
+        const { id } = req.params;
+
+        const result = await schedulerManager.deleteSchedule(id);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error deleting schedule:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to delete schedule',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/schedules/:id/toggle
+ * Abilita/disabilita schedule
+ */
+app.post('/api/schedules/:id/toggle', async (req, res) => {
+    if (!schedulerManager) {
+        return res.status(503).json({
+            error: 'Scheduler system not available'
+        });
+    }
+
+    try {
+        const { id } = req.params;
+
+        const result = await schedulerManager.toggleSchedule(id);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error toggling schedule:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to toggle schedule',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/schedules/:id/execute
+ * Esegui schedule manualmente (una tantum)
+ */
+app.post('/api/schedules/:id/execute', async (req, res) => {
+    if (!schedulerManager) {
+        return res.status(503).json({
+            error: 'Scheduler system not available'
+        });
+    }
+
+    try {
+        const { id } = req.params;
+
+        const result = await schedulerManager.executeSchedule(id);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error executing schedule:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to execute schedule',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/schedules/history
+ * Ottieni history esecuzioni schedule
+ */
+app.get('/api/schedules/history', (req, res) => {
+    if (!schedulerManager) {
+        return res.json({
+            history: []
+        });
+    }
+
+    try {
+        const limit = parseInt(req.query.limit) || 50;
+        const history = schedulerManager.getHistory(limit);
+
+        res.json({
+            success: true,
+            history: history,
+            count: history.length
+        });
+
+    } catch (error) {
+        console.error('Error getting schedule history:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get schedule history',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/schedules/stats
+ * Ottieni statistiche schedules
+ */
+app.get('/api/schedules/stats', (req, res) => {
+    if (!schedulerManager) {
+        return res.json({
+            stats: {
+                total: 0,
+                enabled: 0,
+                disabled: 0
+            }
+        });
+    }
+
+    try {
+        const stats = schedulerManager.getStats();
+
+        res.json({
+            success: true,
+            stats: stats
+        });
+
+    } catch (error) {
+        console.error('Error getting schedule stats:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get schedule stats',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/schedules/cron-templates
+ * Ottieni templates di cron expressions
+ */
+app.get('/api/schedules/cron-templates', (req, res) => {
+    if (!schedulerManager) {
+        return res.json({
+            templates: {}
+        });
+    }
+
+    try {
+        const templates = schedulerManager.getCronTemplates();
+
+        res.json({
+            success: true,
+            templates: templates
+        });
+
+    } catch (error) {
+        console.error('Error getting cron templates:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get cron templates',
             message: error.message
         });
     }

@@ -104,16 +104,60 @@ class MarketplaceManager {
             throw new Error('Type must be "agent" or "workflow"');
         }
 
-        // Validate item exists
-        if (config.type === 'agent') {
-            const agent = this.agentManager.getAgent(config.name);
-            if (!agent) {
-                throw new Error(`Agent "${config.name}" not found`);
-            }
-        } else if (config.type === 'workflow') {
-            const workflow = this.workflowManager.getWorkflow(config.name);
-            if (!workflow) {
-                throw new Error(`Workflow "${config.name}" not found`);
+        // Get version to publish (default: current version from version manager)
+        let versionToPublish = config.version;
+        let itemConfig = config.content;
+
+        // Se non è specificata una versione o content, prendi dalla versione corrente
+        if (!versionToPublish || !itemConfig) {
+            if (config.type === 'agent') {
+                const agent = this.agentManager.getAgent(config.name);
+                if (!agent) {
+                    throw new Error(`Agent "${config.name}" not found`);
+                }
+
+                // Prova a ottenere versioni
+                try {
+                    const versions = await this.agentManager.listAgentVersions(config.name);
+                    if (versions.currentVersion) {
+                        versionToPublish = versionToPublish || versions.currentVersion;
+                        if (!itemConfig) {
+                            itemConfig = await this.agentManager.getAgentVersion(config.name, versions.currentVersion);
+                        }
+                    } else {
+                        // Nessuna versione, usa config corrente
+                        versionToPublish = versionToPublish || '1.0.0';
+                        itemConfig = itemConfig || agent.config;
+                    }
+                } catch {
+                    // Versioning non disponibile, usa config corrente
+                    versionToPublish = versionToPublish || '1.0.0';
+                    itemConfig = itemConfig || agent.config;
+                }
+            } else if (config.type === 'workflow') {
+                const workflow = this.workflowManager.getWorkflow(config.name);
+                if (!workflow) {
+                    throw new Error(`Workflow "${config.name}" not found`);
+                }
+
+                // Prova a ottenere versioni
+                try {
+                    const versions = await this.workflowManager.listWorkflowVersions(config.name);
+                    if (versions.currentVersion) {
+                        versionToPublish = versionToPublish || versions.currentVersion;
+                        if (!itemConfig) {
+                            itemConfig = await this.workflowManager.getWorkflowVersion(config.name, versions.currentVersion);
+                        }
+                    } else {
+                        // Nessuna versione, usa config corrente
+                        versionToPublish = versionToPublish || '1.0.0';
+                        itemConfig = itemConfig || workflow;
+                    }
+                } catch {
+                    // Versioning non disponibile, usa config corrente
+                    versionToPublish = versionToPublish || '1.0.0';
+                    itemConfig = itemConfig || workflow;
+                }
             }
         }
 
@@ -124,12 +168,12 @@ class MarketplaceManager {
             displayName: config.displayName || config.name,
             description: config.description || '',
             author: config.author || 'Anonymous',
-            version: config.version || '1.0.0',
+            version: versionToPublish,
             tags: config.tags || [],
             category: config.category || 'general',
 
             // Content (actual agent/workflow config)
-            content: config.content,
+            content: itemConfig,
 
             // Metadata
             featured: config.featured || false,

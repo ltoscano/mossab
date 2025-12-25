@@ -2901,6 +2901,314 @@ app.get('/api/schedules/cron-templates', (req, res) => {
 });
 
 // ============================================================================
+// VERSIONING API ENDPOINTS
+// ============================================================================
+
+/**
+ * POST /api/agents/:name/versions
+ * Crea una nuova versione di un agent
+ */
+app.post('/api/agents/:name/versions', async (req, res) => {
+    if (!agentManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Agent Manager not available'
+        });
+    }
+
+    try {
+        const { name } = req.params;
+        const { version, tag, changelog, author } = req.body;
+
+        const result = await agentManager.createAgentVersion(name, version, {
+            tag,
+            changelog,
+            author,
+            setAsLatest: req.body.setAsLatest,
+            setAsCurrent: req.body.setAsCurrent
+        });
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error creating agent version:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to create agent version',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/agents/:name/versions
+ * Lista tutte le versioni di un agent
+ */
+app.get('/api/agents/:name/versions', async (req, res) => {
+    if (!agentManager) {
+        return res.json({
+            success: true,
+            versions: []
+        });
+    }
+
+    try {
+        const { name } = req.params;
+        const result = await agentManager.listAgentVersions(name);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error listing agent versions:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to list agent versions',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/agents/:name/versions/:version
+ * Ottieni una versione specifica di un agent
+ */
+app.get('/api/agents/:name/versions/:version', async (req, res) => {
+    if (!agentManager) {
+        return res.status(404).json({
+            success: false,
+            error: 'Agent Manager not available'
+        });
+    }
+
+    try {
+        const { name, version } = req.params;
+        const config = await agentManager.getAgentVersion(name, version);
+
+        res.json({
+            success: true,
+            version,
+            config
+        });
+
+    } catch (error) {
+        console.error('Error getting agent version:', error);
+        res.status(404).json({
+            success: false,
+            error: 'Version not found',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/agents/:name/versions/:version/switch
+ * Switch alla versione specifica
+ */
+app.post('/api/agents/:name/versions/:version/switch', async (req, res) => {
+    if (!agentManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Agent Manager not available'
+        });
+    }
+
+    try {
+        const { name, version } = req.params;
+        const result = await agentManager.switchAgentVersion(name, version);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error switching agent version:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to switch version',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * DELETE /api/agents/:name/versions/:version
+ * Elimina una versione
+ */
+app.delete('/api/agents/:name/versions/:version', async (req, res) => {
+    if (!agentManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Agent Manager not available'
+        });
+    }
+
+    try {
+        const { name, version } = req.params;
+        const result = await agentManager.deleteAgentVersion(name, version);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error deleting agent version:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to delete version',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/workflows/:name/versions
+ * Crea una nuova versione di un workflow
+ */
+app.post('/api/workflows/:name/versions', async (req, res) => {
+    if (!workflowManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Workflow Manager not available'
+        });
+    }
+
+    try {
+        const { name } = req.params;
+        const { version, tag, changelog, author } = req.body;
+
+        const result = await workflowManager.createWorkflowVersion(name, version, {
+            tag,
+            changelog,
+            author,
+            setAsLatest: req.body.setAsLatest,
+            setAsCurrent: req.body.setAsCurrent
+        });
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error creating workflow version:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to create workflow version',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/workflows/:name/versions
+ * Lista tutte le versioni di un workflow
+ */
+app.get('/api/workflows/:name/versions', async (req, res) => {
+    if (!workflowManager) {
+        return res.json({
+            success: true,
+            versions: []
+        });
+    }
+
+    try {
+        const { name } = req.params;
+        const result = await workflowManager.listWorkflowVersions(name);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error listing workflow versions:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to list workflow versions',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/workflows/:name/versions/:version
+ * Ottieni una versione specifica di un workflow
+ */
+app.get('/api/workflows/:name/versions/:version', async (req, res) => {
+    if (!workflowManager) {
+        return res.status(404).json({
+            success: false,
+            error: 'Workflow Manager not available'
+        });
+    }
+
+    try {
+        const { name, version } = req.params;
+        const config = await workflowManager.getWorkflowVersion(name, version);
+
+        res.json({
+            success: true,
+            version,
+            config
+        });
+
+    } catch (error) {
+        console.error('Error getting workflow version:', error);
+        res.status(404).json({
+            success: false,
+            error: 'Version not found',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/workflows/:name/versions/:version/switch
+ * Switch alla versione specifica
+ */
+app.post('/api/workflows/:name/versions/:version/switch', async (req, res) => {
+    if (!workflowManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Workflow Manager not available'
+        });
+    }
+
+    try {
+        const { name, version } = req.params;
+        const result = await workflowManager.switchWorkflowVersion(name, version);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error switching workflow version:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to switch version',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * DELETE /api/workflows/:name/versions/:version
+ * Elimina una versione
+ */
+app.delete('/api/workflows/:name/versions/:version', async (req, res) => {
+    if (!workflowManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Workflow Manager not available'
+        });
+    }
+
+    try {
+        const { name, version } = req.params;
+        const result = await workflowManager.deleteWorkflowVersion(name, version);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error deleting workflow version:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to delete version',
+            message: error.message
+        });
+    }
+});
+
+// ============================================================================
 // MARKETPLACE API ENDPOINTS
 // ============================================================================
 

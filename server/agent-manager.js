@@ -3,6 +3,7 @@ const path = require('path');
 const CustomAgent = require('./agents/custom-agent');
 const ExploreAgent = require('./agents/explore-agent');
 const PlanAgent = require('./agents/plan-agent');
+const VersionManager = require('./version-manager');
 
 /**
  * AgentManager - Sistema di orchestrazione agents
@@ -26,6 +27,9 @@ class AgentManager {
 
     // Custom agents (caricati da .mossab/agents/)
     this.customAgents = {};
+
+    // Version Manager per gestire versioni agents
+    this.versionManager = new VersionManager(this.agentsDir, 'agent');
 
     // Stats
     this.stats = {
@@ -529,6 +533,73 @@ class AgentManager {
     };
 
     return templates[type] || null;
+  }
+
+  // ============================================================================
+  // VERSIONING METHODS
+  // ============================================================================
+
+  /**
+   * Crea una nuova versione di un agent
+   */
+  async createAgentVersion(name, version, options = {}) {
+    // Verifica che l'agent esista
+    if (!this.customAgents[name]) {
+      throw new Error(`Agent ${name} not found`);
+    }
+
+    // Ottieni config corrente
+    const currentConfig = this.customAgents[name].config;
+
+    // Crea la versione
+    return await this.versionManager.createVersion(name, version, currentConfig, options);
+  }
+
+  /**
+   * Lista tutte le versioni di un agent
+   */
+  async listAgentVersions(name) {
+    return await this.versionManager.listVersions(name);
+  }
+
+  /**
+   * Ottieni una versione specifica di un agent
+   */
+  async getAgentVersion(name, version) {
+    return await this.versionManager.getVersion(name, version);
+  }
+
+  /**
+   * Switch alla versione specifica di un agent
+   */
+  async switchAgentVersion(name, version) {
+    const result = await this.versionManager.switchVersion(name, version);
+
+    // Reload l'agent con la nuova versione
+    const agent = new CustomAgent(result.config, this.workspaceRoot);
+    this.customAgents[name] = agent;
+
+    return result;
+  }
+
+  /**
+   * Elimina una versione di un agent
+   */
+  async deleteAgentVersion(name, version) {
+    return await this.versionManager.deleteVersion(name, version);
+  }
+
+  /**
+   * Suggerisci prossima versione per un agent
+   */
+  async suggestNextAgentVersion(name, bumpType = 'patch') {
+    const versions = await this.versionManager.listVersions(name);
+
+    if (!versions.currentVersion) {
+      return '1.0.0';
+    }
+
+    return this.versionManager.suggestNextVersion(versions.currentVersion, bumpType);
   }
 }
 

@@ -1,5 +1,6 @@
 const fs = require('fs').promises;
 const path = require('path');
+const VersionManager = require('./version-manager');
 
 /**
  * WorkflowManager - Sistema per combinare multipli agents in workflow complessi
@@ -16,6 +17,9 @@ class WorkflowManager {
     this.agentManager = agentManager;
     this.workflowsDir = path.join(workspaceRoot, '.mossab', 'workflows');
     this.workflows = {};
+
+    // Version Manager per gestire versioni workflows
+    this.versionManager = new VersionManager(this.workflowsDir, 'workflow');
 
     console.log('🔄 WorkflowManager initialized');
   }
@@ -372,6 +376,72 @@ class WorkflowManager {
     console.log('🔄 Reloading workflows...');
     await this.loadWorkflows();
     return this.listWorkflows();
+  }
+
+  // ============================================================================
+  // VERSIONING METHODS
+  // ============================================================================
+
+  /**
+   * Crea una nuova versione di un workflow
+   */
+  async createWorkflowVersion(name, version, options = {}) {
+    // Verifica che il workflow esista
+    if (!this.workflows[name]) {
+      throw new Error(`Workflow ${name} not found`);
+    }
+
+    // Ottieni config corrente
+    const currentConfig = this.workflows[name];
+
+    // Crea la versione
+    return await this.versionManager.createVersion(name, version, currentConfig, options);
+  }
+
+  /**
+   * Lista tutte le versioni di un workflow
+   */
+  async listWorkflowVersions(name) {
+    return await this.versionManager.listVersions(name);
+  }
+
+  /**
+   * Ottieni una versione specifica di un workflow
+   */
+  async getWorkflowVersion(name, version) {
+    return await this.versionManager.getVersion(name, version);
+  }
+
+  /**
+   * Switch alla versione specifica di un workflow
+   */
+  async switchWorkflowVersion(name, version) {
+    const result = await this.versionManager.switchVersion(name, version);
+
+    // Reload il workflow con la nuova versione
+    this.workflows[name] = result.config;
+
+    return result;
+  }
+
+  /**
+   * Elimina una versione di un workflow
+   */
+  async deleteWorkflowVersion(name, version) {
+    return await this.versionManager.deleteVersion(name, version);
+  }
+
+  /**
+   * Suggerisci prossima versione per un workflow
+   */
+  async suggestNextWorkflowVersion(name, bumpType = 'patch') {
+    const versions = await this.versionManager.listVersions(name);
+
+    if (!versions.currentVersion) {
+      return '1.0.0';
+    }
+
+    return this.versionManager.suggestNextVersion(versions.currentVersion, bumpType);
   }
 }
 

@@ -52,83 +52,170 @@ Quando configurato con API key, Mossab può invocare questi strumenti:
 
 ### Prerequisiti
 
-- Node.js v14 o superiore
+- **Node.js 16+** (funziona su **Linux, macOS, Windows**)
 - npm o yarn
 - API key di Anthropic (per capacità complete) - [Ottienila qui](https://console.anthropic.com/)
 
 ### Installazione
 
-1. **Clona il repository**
-   ```bash
-   git clone <repository-url>
-   cd mossab
-   ```
+#### Opzione 1: Installazione Globale (Consigliata)
 
-2. **Installa le dipendenze**
-   ```bash
-   npm install
-   ```
+```bash
+# 1. Clona il repository
+git clone <repository-url>
+cd mossab
 
-3. **Configura l'API Key** ⚡ IMPORTANTE
-   ```bash
-   cp .env.example .env
-   ```
+# 2. Installa dipendenze
+npm install
 
-   Modifica il file `.env` e aggiungi la tua API key:
-   ```env
-   ANTHROPIC_API_KEY=sk-ant-your-api-key-here
-   AI_MODEL=claude-sonnet-4-5-20250929
-   ENABLE_TOOL_USE=true
-   ENABLE_PLANNING=true
-   ENABLE_MEMORY=true
-   ```
+# 3. Installa globalmente
+npm install -g .
 
-   **Nota**: Senza API key, Mossab funzionerà in modalità limitata con risposte predefinite.
+# 4. Usa ovunque!
+cd ~/my-project
+mossab
+```
 
-4. **Avvia il server**
-   ```bash
-   npm start
-   ```
+#### Opzione 2: Installazione Locale
 
-5. **Apri il browser**
-   ```
-   http://localhost:3000
-   ```
+```bash
+# 1. Clona e installa
+git clone <repository-url>
+cd mossab
+npm install
+
+# 2. Usa con npm start
+npm start
+```
+
+### 🔑 Configurazione API Key
+
+**Linux/macOS:**
+```bash
+export ANTHROPIC_API_KEY='sk-ant-your-api-key-here'
+```
+
+**Windows (PowerShell):**
+```powershell
+$env:ANTHROPIC_API_KEY='sk-ant-your-api-key-here'
+```
+
+**Windows (CMD):**
+```cmd
+set ANTHROPIC_API_KEY=sk-ant-your-api-key-here
+```
+
+**Permanente (file .env nel tuo progetto):**
+```env
+ANTHROPIC_API_KEY=sk-ant-your-api-key-here
+PORT=3000
+```
+
+### 📖 Utilizzo del CLI
+
+#### Modalità 1: Directory Corrente
+```bash
+cd ~/my-awesome-project
+mossab
+# Lavora su ~/my-awesome-project
+```
+
+#### Modalità 2: Specifica Directory
+```bash
+mossab /path/to/my/project
+mossab ~/Documents/website
+mossab "C:\Users\Me\Projects\app"  # Windows
+```
+
+#### Modalità 3: Opzioni Avanzate
+```bash
+# Porta personalizzata
+mossab --port 8080
+mossab ~/my-project -p 3001
+
+# Non aprire browser
+mossab --no-open
+
+# Mostra aiuto
+mossab --help
+
+# Mostra versione
+mossab --version
+```
+
+### 🖥️ Compatibilità Multi-Piattaforma
+
+| Sistema | Supporto | Note |
+|---------|----------|------|
+| 🐧 Linux | ✅ Completo | Ubuntu, Debian, Fedora |
+| 🍎 macOS | ✅ Completo | macOS 10.15+ |
+| 🪟 Windows | ✅ Completo | Win 10/11, PowerShell/CMD |
 
 ### 🎬 Demo Veloce (senza API key)
 
-Puoi provare Mossab anche senza API key per vedere l'interfaccia:
 ```bash
 npm install
 npm start
+# Mossab funziona anche senza API key (modalità limitata)
 ```
-Mossab risponderà con un messaggio che ti guiderà nella configurazione completa!
 
 ## 📁 Struttura del Progetto
 
 ```
 mossab/
+├── bin/
+│   └── mossab.js                # CLI entry point (cross-platform)
 ├── server/
-│   ├── index.js           # Server Express principale
-│   └── claude-service.js  # Servizio integrazione Claude API con tool use
+│   ├── index.js                 # Server Express principale
+│   ├── claude-service.js        # Servizio integrazione Claude API
+│   ├── agent-manager.js         # Gestione agenti custom
+│   ├── workflow-manager.js      # Orchestrazione workflow
+│   ├── webhook-manager.js       # Sistema webhook
+│   ├── scheduler-manager.js     # Scheduled tasks
+│   ├── marketplace-manager.js   # Marketplace agenti/workflow
+│   ├── analytics-manager.js     # Analytics e metriche
+│   └── version-manager.js       # Version management system
 ├── public/
-│   ├── index.html         # Interfaccia chat moderna
+│   ├── index.html               # UI principale
 │   ├── css/
-│   │   └── styles.css     # Styling premium con glassmorphism
+│   │   └── styles.css           # Design moderno
 │   └── js/
-│       └── app.js         # Logica frontend e gestione chat
-├── package.json           # Dipendenze (@anthropic-ai/sdk, express, ecc.)
-├── .env.example           # Template configurazione
-├── .gitignore
+│       ├── app.js               # Chat logic
+│       ├── agents-ui.js         # UI gestione agenti
+│       ├── workflows-ui.js      # UI gestione workflow
+│       ├── marketplace-ui.js    # UI marketplace
+│       └── analytics-ui.js      # UI analytics
+├── package.json                 # Dipendenze e bin config
+├── .env.example                 # Template configurazione
 └── README.md
+```
+
+### 📂 Workspace Directory
+
+Quando avvii Mossab in un progetto, crea automaticamente:
+
+```
+your-project/
+├── .mossab/
+│   ├── agents/              # Agenti custom
+│   │   └── my-agent/
+│   │       ├── config.json
+│   │       └── versions.json
+│   ├── workflows/           # Workflow definitions
+│   ├── webhooks/            # Webhook configs
+│   ├── schedules/           # Scheduled tasks
+│   ├── marketplace/         # Published items
+│   └── analytics/           # Analytics data
+└── [i tuoi file del progetto]
 ```
 
 ### 🔍 File Chiave
 
-- **`server/claude-service.js`**: Core service che implementa tool use, planning, memoria, e reasoning
-- **`server/index.js`**: REST API con endpoint per chat, streaming, e session management
-- **`public/css/styles.css`**: Design moderno ispirato a Claude AI
-- **`public/js/app.js`**: Client-side logic con auto-resize, markdown formatting, ecc.
+- **`bin/mossab.js`**: CLI cross-platform con workspace support
+- **`server/claude-service.js`**: Core AI service con tool use, planning, memoria
+- **`server/index.js`**: REST API e workspace management
+- **`server/*-manager.js`**: Sistema modulare per agenti, workflow, marketplace
+- **`public/js/*-ui.js`**: UI components per ogni feature
 
 ## 🎨 Design & UI
 

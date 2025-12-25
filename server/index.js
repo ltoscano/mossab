@@ -21,7 +21,8 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, '../public')));
 
 // Workspace root per filesystem operations
-const WORKSPACE_ROOT = path.join(__dirname, '..');
+// Use MOSSAB_WORKSPACE environment variable if set, otherwise use current directory
+const WORKSPACE_ROOT = process.env.MOSSAB_WORKSPACE || process.cwd();
 
 // Inizializza Claude Service
 let claudeService;

@@ -3,16 +3,22 @@
   "version": "1.0.0",
   "description": "Mossab - Your AI Developer. Un assistente di programmazione artificiale intelligente.",
   "main": "server/index.js",
+  "bin": {
+    "mossab": "./bin/mossab.js"
+  },
   "scripts": {
-    "start": "node server/index.js",
-    "dev": "node server/index.js"
+    "start": "node bin/mossab.js",
+    "dev": "node bin/mossab.js",
+    "server": "node server/index.js"
   },
   "keywords": [
     "ai",
     "developer",
     "assistant",
     "chat",
-    "programming"
+    "programming",
+    "cli",
+    "workspace"
   ],
   "author": "Mossab AI Team",
   "license": "MIT",

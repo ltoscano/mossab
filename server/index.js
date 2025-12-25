@@ -5,6 +5,7 @@ require('dotenv').config();
 
 const ClaudeService = require('./claude-service');
 const StreamingManager = require('./streaming-manager');
+const AgentManager = require('./agent-manager');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -31,6 +32,20 @@ try {
 // Inizializza Streaming Manager per steering support
 const streamingManager = new StreamingManager();
 console.log('✅ Streaming Manager initialized - steering support enabled');
+
+// Inizializza Agent Manager per agent orchestration
+let agentManager;
+try {
+    agentManager = new AgentManager(WORKSPACE_ROOT);
+    // Initialize agents asynchronously
+    agentManager.initialize().then(stats => {
+        console.log(`✅ Agent Manager initialized - ${stats.total} agents available (${stats.builtin} builtin + ${stats.custom} custom)`);
+    }).catch(error => {
+        console.warn('⚠️  Agent Manager initialization warning:', error.message);
+    });
+} catch (error) {
+    console.warn('⚠️  Agent Manager initialization failed:', error.message);
+}
 
 // Session storage (in produzione usare Redis o DB)
 const sessions = new Map();
@@ -1515,6 +1530,292 @@ app.post('/api/skills/reload', async (req, res) => {
         console.error('Error reloading skills:', error);
         res.status(500).json({
             error: 'Failed to reload skills',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * AGENT SYSTEM ENDPOINTS
+ * Sistema di orchestrazione agents (builtin + custom)
+ */
+
+/**
+ * GET /api/agents
+ * Lista tutti gli agents disponibili (builtin + custom)
+ */
+app.get('/api/agents', (req, res) => {
+    if (!agentManager) {
+        return res.json({
+            builtin: [],
+            custom: [],
+            total: 0,
+            message: 'Agent system not available'
+        });
+    }
+
+    try {
+        const agents = agentManager.listAgents();
+
+        res.json({
+            ...agents,
+            agentsDirectory: '.mossab/agents/'
+        });
+
+    } catch (error) {
+        console.error('Error listing agents:', error);
+        res.status(500).json({
+            error: 'Failed to list agents',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/agents/:name
+ * Ottieni info dettagliate su un agent specifico
+ */
+app.get('/api/agents/:name', (req, res) => {
+    if (!agentManager) {
+        return res.status(503).json({
+            error: 'Agent system not available'
+        });
+    }
+
+    try {
+        const { name } = req.params;
+        const info = agentManager.getAgentInfo(name);
+
+        if (!info) {
+            return res.status(404).json({
+                error: 'Agent not found',
+                available: agentManager.listAgentNames()
+            });
+        }
+
+        res.json({
+            agent: info
+        });
+
+    } catch (error) {
+        console.error('Error getting agent info:', error);
+        res.status(500).json({
+            error: 'Failed to get agent info',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/agents/execute
+ * Esegui un agent specifico
+ */
+app.post('/api/agents/execute', async (req, res) => {
+    if (!agentManager) {
+        return res.status(503).json({
+            error: 'Agent system not available'
+        });
+    }
+
+    try {
+        const { agent, task, options = {} } = req.body;
+
+        if (!agent || !task) {
+            return res.status(400).json({
+                error: 'agent and task are required',
+                example: {
+                    agent: 'explore',
+                    task: 'Find all error handling code',
+                    options: {
+                        thoroughness: 'medium'
+                    }
+                }
+            });
+        }
+
+        // Esegui agent
+        const result = await agentManager.executeAgent(agent, task, options);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error executing agent:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to execute agent',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/agents/execute-parallel
+ * Esegui multipli agents in parallelo
+ */
+app.post('/api/agents/execute-parallel', async (req, res) => {
+    if (!agentManager) {
+        return res.status(503).json({
+            error: 'Agent system not available'
+        });
+    }
+
+    try {
+        const { agents } = req.body;
+
+        if (!agents || !Array.isArray(agents) || agents.length === 0) {
+            return res.status(400).json({
+                error: 'agents array is required',
+                example: {
+                    agents: [
+                        { agent: 'security-audit', task: 'Scan for vulnerabilities' },
+                        { agent: 'perf-profiler', task: 'Find performance bottlenecks' }
+                    ]
+                }
+            });
+        }
+
+        // Esegui agents in parallelo
+        const result = await agentManager.executeParallel(agents);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error executing parallel agents:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to execute parallel agents',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/agents/reload
+ * Ricarica custom agents da .mossab/agents/
+ */
+app.post('/api/agents/reload', async (req, res) => {
+    if (!agentManager) {
+        return res.status(503).json({
+            error: 'Agent system not available'
+        });
+    }
+
+    try {
+        const agents = await agentManager.reloadCustomAgents();
+
+        res.json({
+            success: true,
+            message: 'Custom agents reloaded successfully',
+            ...agents
+        });
+
+    } catch (error) {
+        console.error('Error reloading agents:', error);
+        res.status(500).json({
+            error: 'Failed to reload agents',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/agents/stats
+ * Ottieni statistiche di utilizzo agents
+ */
+app.get('/api/agents/stats', (req, res) => {
+    if (!agentManager) {
+        return res.json({
+            totalExecutions: 0,
+            message: 'Agent system not available'
+        });
+    }
+
+    try {
+        const stats = agentManager.getStats();
+
+        res.json({
+            stats: stats
+        });
+
+    } catch (error) {
+        console.error('Error getting agent stats:', error);
+        res.status(500).json({
+            error: 'Failed to get stats',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/agents/stats/reset
+ * Reset statistiche agents
+ */
+app.post('/api/agents/stats/reset', (req, res) => {
+    if (!agentManager) {
+        return res.status(503).json({
+            error: 'Agent system not available'
+        });
+    }
+
+    try {
+        const result = agentManager.resetStats();
+
+        res.json({
+            success: true,
+            message: 'Agent stats reset successfully'
+        });
+
+    } catch (error) {
+        console.error('Error resetting stats:', error);
+        res.status(500).json({
+            error: 'Failed to reset stats',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/agents/suggest
+ * Suggerisci quale agent usare per un task
+ */
+app.post('/api/agents/suggest', (req, res) => {
+    if (!agentManager) {
+        return res.status(503).json({
+            error: 'Agent system not available'
+        });
+    }
+
+    try {
+        const { task } = req.body;
+
+        if (!task) {
+            return res.status(400).json({
+                error: 'task is required'
+            });
+        }
+
+        const suggested = agentManager.suggestAgent(task);
+
+        if (!suggested) {
+            return res.json({
+                suggested: null,
+                message: 'Could not determine best agent for this task',
+                available: agentManager.listAgentNames()
+            });
+        }
+
+        const agentInfo = agentManager.getAgentInfo(suggested);
+
+        res.json({
+            suggested: suggested,
+            info: agentInfo,
+            reason: `Based on your task, '${suggested}' seems most appropriate`
+        });
+
+    } catch (error) {
+        console.error('Error suggesting agent:', error);
+        res.status(500).json({
+            error: 'Failed to suggest agent',
             message: error.message
         });
     }

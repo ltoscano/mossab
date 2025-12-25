@@ -94,9 +94,6 @@ class ClaudeService {
         // Context Manager per gestione automatica del context window
         this.contextManager = new ContextManager(this.model);
 
-        // Esponi client Anthropic per ContextManager (per summarization)
-        this.anthropic = this.client;
-
         // Project Context Manager per preferenze e istruzioni del progetto
         this.projectContextManager = new ProjectContextManager(workspaceRoot);
         this.cachedProjectContextAddition = '';
@@ -739,7 +736,8 @@ ${this.cachedProjectContextAddition}`;
                         ...toolResults
                     ],
                     max_tokens: this.maxTokens,
-                    temperature: 0.7
+                    temperature: 0.7,
+                    tools: tools.length > 0 ? tools : undefined
                 });
 
                 finalResponse += followUpResponse.choices[0].message.content || '';
@@ -1089,6 +1087,11 @@ Per favore, incorpora questo feedback nella tua risposta e continua, tenendo con
      */
     async getContextStats(conversationHistory = []) {
         try {
+            // Ensure conversationHistory is an array
+            if (!Array.isArray(conversationHistory)) {
+                conversationHistory = [];
+            }
+
             const messages = conversationHistory.map(msg => ({
                 role: msg.role,
                 content: msg.content

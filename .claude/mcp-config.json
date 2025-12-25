@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "servers": [
+    {
+      "name": "example-server",
+      "url": "https://example.com/mcp",
+      "bearerToken": "",
+      "enabled": false,
+      "description": "Example MCP server configuration. Edit this to add your servers.",
+      "timeout": 30000
+    }
+  ]
+}

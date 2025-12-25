@@ -6,6 +6,7 @@ require('dotenv').config();
 const ClaudeService = require('./claude-service');
 const StreamingManager = require('./streaming-manager');
 const AgentManager = require('./agent-manager');
+const WorkflowManager = require('./workflow-manager');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -45,6 +46,20 @@ try {
     });
 } catch (error) {
     console.warn('⚠️  Agent Manager initialization failed:', error.message);
+}
+
+// Inizializza Workflow Manager per agent pipelines
+let workflowManager;
+try {
+    workflowManager = new WorkflowManager(WORKSPACE_ROOT, agentManager);
+    // Initialize workflows asynchronously
+    workflowManager.initialize().then(stats => {
+        console.log(`✅ Workflow Manager initialized - ${stats.total} workflows available`);
+    }).catch(error => {
+        console.warn('⚠️  Workflow Manager initialization warning:', error.message);
+    });
+} catch (error) {
+    console.warn('⚠️  Workflow Manager initialization failed:', error.message);
 }
 
 // Session storage (in produzione usare Redis o DB)
@@ -1816,6 +1831,382 @@ app.post('/api/agents/suggest', (req, res) => {
         console.error('Error suggesting agent:', error);
         res.status(500).json({
             error: 'Failed to suggest agent',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * AGENT COMPOSER ENDPOINTS
+ * Creazione agents via API senza scrivere JSON
+ */
+
+/**
+ * POST /api/agents/compose
+ * Crea un nuovo agent custom
+ */
+app.post('/api/agents/compose', async (req, res) => {
+    if (!agentManager) {
+        return res.status(503).json({
+            error: 'Agent system not available'
+        });
+    }
+
+    try {
+        const config = req.body;
+
+        if (!config.name) {
+            return res.status(400).json({
+                error: 'name is required',
+                example: {
+                    name: 'my-agent',
+                    description: 'My custom agent',
+                    model: 'sonnet',
+                    tools: ['read', 'grep'],
+                    systemPrompt: 'You are a helpful assistant...'
+                }
+            });
+        }
+
+        const result = await agentManager.createAgent(config);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error composing agent:', error);
+        res.status(400).json({
+            error: 'Failed to create agent',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * PUT /api/agents/:name
+ * Aggiorna agent esistente
+ */
+app.put('/api/agents/:name', async (req, res) => {
+    if (!agentManager) {
+        return res.status(503).json({
+            error: 'Agent system not available'
+        });
+    }
+
+    try {
+        const { name } = req.params;
+        const updates = req.body;
+
+        const result = await agentManager.updateAgent(name, updates);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error updating agent:', error);
+        res.status(400).json({
+            error: 'Failed to update agent',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * DELETE /api/agents/:name
+ * Elimina agent custom
+ */
+app.delete('/api/agents/:name', async (req, res) => {
+    if (!agentManager) {
+        return res.status(503).json({
+            error: 'Agent system not available'
+        });
+    }
+
+    try {
+        const { name } = req.params;
+
+        const result = await agentManager.deleteAgent(name);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error deleting agent:', error);
+        res.status(400).json({
+            error: 'Failed to delete agent',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/agents/templates/:type
+ * Ottieni template agent per tipo specifico
+ */
+app.get('/api/agents/templates/:type', (req, res) => {
+    if (!agentManager) {
+        return res.status(503).json({
+            error: 'Agent system not available'
+        });
+    }
+
+    try {
+        const { type } = req.params;
+        const template = agentManager.generateAgentTemplate(type);
+
+        if (!template) {
+            return res.status(404).json({
+                error: 'Template not found',
+                available: ['code-analyzer', 'api-designer', 'bug-hunter', 'refactoring-assistant']
+            });
+        }
+
+        res.json({
+            template: template
+        });
+
+    } catch (error) {
+        console.error('Error getting template:', error);
+        res.status(500).json({
+            error: 'Failed to get template',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * WORKFLOW SYSTEM ENDPOINTS
+ * Combinare agents in pipeline complesse
+ */
+
+/**
+ * GET /api/workflows
+ * Lista workflows disponibili
+ */
+app.get('/api/workflows', (req, res) => {
+    if (!workflowManager) {
+        return res.json({
+            workflows: [],
+            message: 'Workflow system not available'
+        });
+    }
+
+    try {
+        const workflows = workflowManager.listWorkflows();
+
+        res.json({
+            workflows: workflows,
+            count: workflows.length,
+            workflowsDirectory: '.mossab/workflows/'
+        });
+
+    } catch (error) {
+        console.error('Error listing workflows:', error);
+        res.status(500).json({
+            error: 'Failed to list workflows',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/workflows/:name
+ * Ottieni workflow specifico
+ */
+app.get('/api/workflows/:name', (req, res) => {
+    if (!workflowManager) {
+        return res.status(503).json({
+            error: 'Workflow system not available'
+        });
+    }
+
+    try {
+        const { name } = req.params;
+        const workflow = workflowManager.getWorkflow(name);
+
+        if (!workflow) {
+            return res.status(404).json({
+                error: 'Workflow not found',
+                available: workflowManager.listWorkflows().map(w => w.name)
+            });
+        }
+
+        res.json({
+            workflow: workflow
+        });
+
+    } catch (error) {
+        console.error('Error getting workflow:', error);
+        res.status(500).json({
+            error: 'Failed to get workflow',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/workflows/execute
+ * Esegui workflow
+ */
+app.post('/api/workflows/execute', async (req, res) => {
+    if (!workflowManager) {
+        return res.status(503).json({
+            error: 'Workflow system not available'
+        });
+    }
+
+    try {
+        const { workflow, context = {} } = req.body;
+
+        if (!workflow) {
+            return res.status(400).json({
+                error: 'workflow name is required',
+                example: {
+                    workflow: 'full-audit',
+                    context: {
+                        branch: 'main',
+                        environment: 'production'
+                    }
+                }
+            });
+        }
+
+        // Esegui workflow
+        const result = await workflowManager.executeWorkflow(workflow, context);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error executing workflow:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to execute workflow',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/workflows/create
+ * Crea nuovo workflow
+ */
+app.post('/api/workflows/create', async (req, res) => {
+    if (!workflowManager) {
+        return res.status(503).json({
+            error: 'Workflow system not available'
+        });
+    }
+
+    try {
+        const config = req.body;
+
+        if (!config.name || !config.steps) {
+            return res.status(400).json({
+                error: 'name and steps are required',
+                example: {
+                    name: 'my-workflow',
+                    description: 'Description',
+                    steps: [
+                        {
+                            name: 'Step 1',
+                            agent: 'explore',
+                            task: 'Find all TODO comments'
+                        }
+                    ]
+                }
+            });
+        }
+
+        const result = await workflowManager.createWorkflow(config);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error creating workflow:', error);
+        res.status(400).json({
+            error: 'Failed to create workflow',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * PUT /api/workflows/:name
+ * Aggiorna workflow esistente
+ */
+app.put('/api/workflows/:name', async (req, res) => {
+    if (!workflowManager) {
+        return res.status(503).json({
+            error: 'Workflow system not available'
+        });
+    }
+
+    try {
+        const { name } = req.params;
+        const updates = req.body;
+
+        const result = await workflowManager.updateWorkflow(name, updates);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error updating workflow:', error);
+        res.status(400).json({
+            error: 'Failed to update workflow',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * DELETE /api/workflows/:name
+ * Elimina workflow
+ */
+app.delete('/api/workflows/:name', async (req, res) => {
+    if (!workflowManager) {
+        return res.status(503).json({
+            error: 'Workflow system not available'
+        });
+    }
+
+    try {
+        const { name } = req.params;
+
+        const result = await workflowManager.deleteWorkflow(name);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error deleting workflow:', error);
+        res.status(400).json({
+            error: 'Failed to delete workflow',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/workflows/reload
+ * Ricarica workflows da disco
+ */
+app.post('/api/workflows/reload', async (req, res) => {
+    if (!workflowManager) {
+        return res.status(503).json({
+            error: 'Workflow system not available'
+        });
+    }
+
+    try {
+        const workflows = await workflowManager.reloadWorkflows();
+
+        res.json({
+            success: true,
+            message: 'Workflows reloaded successfully',
+            workflows: workflows,
+            count: workflows.length
+        });
+
+    } catch (error) {
+        console.error('Error reloading workflows:', error);
+        res.status(500).json({
+            error: 'Failed to reload workflows',
             message: error.message
         });
     }

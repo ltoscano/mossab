@@ -1,0 +1,47 @@
+{
+  "name": "full-audit",
+  "description": "🔍 Complete codebase audit: security + performance + test coverage",
+  "mode": "sequential",
+  "steps": [
+    {
+      "name": "Security Scan",
+      "agent": "security-audit",
+      "task": "Perform a comprehensive security audit of the entire codebase. Find vulnerabilities, hardcoded secrets, and security issues.",
+      "options": {
+        "thoroughness": "very-thorough"
+      },
+      "outputVariable": "securityResults",
+      "stopOnFailure": false
+    },
+    {
+      "name": "Performance Analysis",
+      "agent": "perf-profiler",
+      "task": "Analyze the codebase for performance bottlenecks, memory leaks, and inefficient algorithms.",
+      "options": {
+        "thoroughness": "very-thorough"
+      },
+      "outputVariable": "performanceResults",
+      "stopOnFailure": false
+    },
+    {
+      "name": "Test Coverage Check",
+      "agent": "test-coverage",
+      "task": "Analyze test coverage and identify critical functions without tests. Generate missing tests for high-priority code.",
+      "options": {
+        "thoroughness": "medium"
+      },
+      "outputVariable": "testResults",
+      "stopOnFailure": false
+    },
+    {
+      "name": "Database Optimization",
+      "agent": "db-optimizer",
+      "task": "Analyze database queries for N+1 problems, missing indexes, and slow queries.",
+      "options": {
+        "thoroughness": "medium"
+      },
+      "outputVariable": "dbResults",
+      "stopOnFailure": false
+    }
+  ]
+}

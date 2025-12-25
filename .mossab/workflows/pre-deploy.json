@@ -1,0 +1,47 @@
+{
+  "name": "pre-deploy",
+  "description": "🚀 Pre-deployment checks: critical security, performance, and tests",
+  "mode": "sequential",
+  "steps": [
+    {
+      "name": "Critical Security Scan",
+      "agent": "security-audit",
+      "task": "Scan ONLY for critical vulnerabilities: SQL injection, XSS, CSRF, hardcoded API keys/secrets. Stop immediately if any CRITICAL issues found.",
+      "options": {
+        "thoroughness": "medium"
+      },
+      "outputVariable": "criticalSecurity",
+      "stopOnFailure": true
+    },
+    {
+      "name": "Test Coverage Verification",
+      "agent": "test-coverage",
+      "task": "Verify that critical business logic has test coverage > 70%. Identify functions without tests that should have them.",
+      "options": {
+        "thoroughness": "medium"
+      },
+      "outputVariable": "coverageCheck",
+      "stopOnFailure": false
+    },
+    {
+      "name": "Performance Bottleneck Check",
+      "agent": "perf-profiler",
+      "task": "Quick check for obvious performance issues: blocking operations, N+1 queries in critical paths, memory leaks.",
+      "options": {
+        "thoroughness": "quick"
+      },
+      "outputVariable": "perfCheck",
+      "stopOnFailure": false
+    },
+    {
+      "name": "Deployment Readiness Assessment",
+      "agent": "plan",
+      "task": "Based on the results:\n- Security: {{criticalSecurity}}\n- Coverage: {{coverageCheck}}\n- Performance: {{perfCheck}}\n\nProvide a GO/NO-GO recommendation for deployment with reasoning.",
+      "options": {
+        "thoroughness": "quick"
+      },
+      "outputVariable": "deploymentDecision",
+      "stopOnFailure": false
+    }
+  ]
+}

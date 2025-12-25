@@ -360,6 +360,176 @@ class AgentManager {
     // Default: explore per task generici
     return 'explore';
   }
+
+  /**
+   * AGENT COMPOSER METHODS
+   * Creazione/modifica agents via API senza scrivere JSON
+   */
+
+  /**
+   * Crea nuovo agent custom
+   */
+  async createAgent(config) {
+    console.log(`📝 Creating custom agent: ${config.name}`);
+
+    // Valida nome
+    if (!config.name || !/^[a-z0-9-]+$/.test(config.name)) {
+      throw new Error('Agent name must be lowercase alphanumeric with hyphens (e.g., my-agent)');
+    }
+
+    // Check se esiste già
+    if (this.builtinAgents[config.name]) {
+      throw new Error(`Cannot override builtin agent: ${config.name}`);
+    }
+
+    if (this.customAgents[config.name]) {
+      throw new Error(`Agent ${config.name} already exists. Use updateAgent to modify it.`);
+    }
+
+    // Valida config
+    const agentConfig = this.buildAgentConfig(config);
+
+    // Salva su disco
+    const filePath = path.join(this.agentsDir, `${config.name}.json`);
+    await fs.writeFile(filePath, JSON.stringify(agentConfig, null, 2), 'utf-8');
+
+    // Carica l'agent
+    const agent = new CustomAgent(agentConfig, this.workspaceRoot);
+    this.customAgents[config.name] = agent;
+
+    console.log(`✅ Agent created: ${config.name}`);
+
+    return {
+      success: true,
+      agent: config.name,
+      filePath: filePath
+    };
+  }
+
+  /**
+   * Aggiorna agent esistente
+   */
+  async updateAgent(name, updates) {
+    if (!this.customAgents[name]) {
+      throw new Error(`Agent ${name} not found. Use createAgent to create it.`);
+    }
+
+    // Leggi config corrente
+    const filePath = path.join(this.agentsDir, `${name}.json`);
+    const currentContent = await fs.readFile(filePath, 'utf-8');
+    const currentConfig = JSON.parse(currentContent);
+
+    // Merge updates
+    const updatedConfig = this.buildAgentConfig({
+      ...currentConfig,
+      ...updates,
+      name: name // Preserva il nome
+    });
+
+    // Salva
+    await fs.writeFile(filePath, JSON.stringify(updatedConfig, null, 2), 'utf-8');
+
+    // Reload agent
+    const agent = new CustomAgent(updatedConfig, this.workspaceRoot);
+    this.customAgents[name] = agent;
+
+    console.log(`✅ Agent updated: ${name}`);
+
+    return {
+      success: true,
+      agent: name
+    };
+  }
+
+  /**
+   * Elimina agent custom
+   */
+  async deleteAgent(name) {
+    if (this.builtinAgents[name]) {
+      throw new Error(`Cannot delete builtin agent: ${name}`);
+    }
+
+    if (!this.customAgents[name]) {
+      throw new Error(`Agent ${name} not found`);
+    }
+
+    // Elimina file
+    const filePath = path.join(this.agentsDir, `${name}.json`);
+    await fs.unlink(filePath);
+
+    // Rimuovi dalla cache
+    delete this.customAgents[name];
+
+    console.log(`✅ Agent deleted: ${name}`);
+
+    return {
+      success: true,
+      agent: name
+    };
+  }
+
+  /**
+   * Build agent config da parametri user-friendly
+   */
+  buildAgentConfig(params) {
+    return {
+      name: params.name,
+      description: params.description || `Custom agent: ${params.name}`,
+      model: params.model || 'sonnet',
+      tools: params.tools || ['read', 'grep', 'glob'],
+      system_prompt: params.system_prompt || params.systemPrompt || 'You are a helpful AI assistant.',
+      thoroughness: params.thoroughness || 'medium',
+      max_iterations: params.max_iterations || params.maxIterations || 5,
+      parallel: params.parallel !== undefined ? params.parallel : false,
+      examples: params.examples || []
+    };
+  }
+
+  /**
+   * Genera template agent basato su tipo
+   */
+  generateAgentTemplate(type) {
+    const templates = {
+      'code-analyzer': {
+        name: 'my-code-analyzer',
+        description: 'Analyzes code for patterns and issues',
+        model: 'sonnet',
+        tools: ['read', 'grep', 'glob'],
+        system_prompt: 'You are an expert code analyzer. Examine code for:\n- Code smells\n- Anti-patterns\n- Maintainability issues\n- Best practices violations\n\nProvide specific file paths and line numbers with suggestions.',
+        thoroughness: 'medium',
+        max_iterations: 8
+      },
+      'api-designer': {
+        name: 'my-api-designer',
+        description: 'Designs RESTful API endpoints',
+        model: 'sonnet',
+        tools: ['read', 'glob'],
+        system_prompt: 'You are an API design expert. Design RESTful APIs following:\n- REST principles\n- Proper HTTP methods\n- Clear endpoint naming\n- Appropriate status codes\n- Request/response schemas\n\nProvide OpenAPI/Swagger specs when possible.',
+        thoroughness: 'medium',
+        max_iterations: 5
+      },
+      'bug-hunter': {
+        name: 'my-bug-hunter',
+        description: 'Finds bugs and potential issues',
+        model: 'opus',
+        tools: ['read', 'grep', 'glob', 'bash'],
+        system_prompt: 'You are a bug hunter. Find:\n- Logic errors\n- Edge cases not handled\n- Race conditions\n- Null pointer issues\n- Off-by-one errors\n\nFor each bug: file path, line number, description, severity, fix suggestion.',
+        thoroughness: 'very-thorough',
+        max_iterations: 10
+      },
+      'refactoring-assistant': {
+        name: 'my-refactoring-assistant',
+        description: 'Suggests code refactoring opportunities',
+        model: 'sonnet',
+        tools: ['read', 'grep', 'glob'],
+        system_prompt: 'You are a refactoring expert. Identify:\n- Duplicate code\n- Long functions/classes\n- Complex conditionals\n- God objects\n- Feature envy\n\nSuggest refactoring with before/after code examples.',
+        thoroughness: 'medium',
+        max_iterations: 8
+      }
+    };
+
+    return templates[type] || null;
+  }
 }
 
 module.exports = AgentManager;

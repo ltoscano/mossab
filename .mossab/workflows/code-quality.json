@@ -1,0 +1,37 @@
+{
+  "name": "code-quality",
+  "description": "✨ Code quality check: analyze code patterns, generate docs, suggest refactoring",
+  "mode": "sequential",
+  "steps": [
+    {
+      "name": "Explore Codebase Structure",
+      "agent": "explore",
+      "task": "Analyze the project structure, identify main components, and understand the architecture.",
+      "options": {
+        "thoroughness": "quick"
+      },
+      "outputVariable": "structureAnalysis",
+      "stopOnFailure": false
+    },
+    {
+      "name": "Generate Missing Documentation",
+      "agent": "doc-generator",
+      "task": "Generate documentation for undocumented functions, classes, and API endpoints. Focus on {{structureAnalysis}}",
+      "options": {
+        "thoroughness": "medium"
+      },
+      "outputVariable": "docResults",
+      "stopOnFailure": false
+    },
+    {
+      "name": "Security Quick Scan",
+      "agent": "security-audit",
+      "task": "Quick security scan for critical vulnerabilities only (SQL injection, XSS, hardcoded secrets).",
+      "options": {
+        "thoroughness": "quick"
+      },
+      "outputVariable": "quickSecurityResults",
+      "stopOnFailure": false
+    }
+  ]
+}

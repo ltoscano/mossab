@@ -9,6 +9,8 @@ const AgentManager = require('./agent-manager');
 const WorkflowManager = require('./workflow-manager');
 const WebhookManager = require('./webhook-manager');
 const SchedulerManager = require('./scheduler-manager');
+const MarketplaceManager = require('./marketplace-manager');
+const AnalyticsManager = require('./analytics-manager');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -90,6 +92,34 @@ try {
     });
 } catch (error) {
     console.warn('⚠️  Scheduler Manager initialization failed:', error.message);
+}
+
+// Inizializza Marketplace Manager per agent/workflow sharing
+let marketplaceManager;
+try {
+    marketplaceManager = new MarketplaceManager(WORKSPACE_ROOT, agentManager, workflowManager);
+    // Initialize marketplace asynchronously
+    marketplaceManager.initialize().then(stats => {
+        console.log(`✅ Marketplace Manager initialized - ${stats.total} items (${stats.agents} agents + ${stats.workflows} workflows)`);
+    }).catch(error => {
+        console.warn('⚠️  Marketplace Manager initialization warning:', error.message);
+    });
+} catch (error) {
+    console.warn('⚠️  Marketplace Manager initialization failed:', error.message);
+}
+
+// Inizializza Analytics Manager per metrics tracking
+let analyticsManager;
+try {
+    analyticsManager = new AnalyticsManager(WORKSPACE_ROOT);
+    // Initialize analytics asynchronously
+    analyticsManager.initialize().then(stats => {
+        console.log(`✅ Analytics Manager initialized - ${stats.totalEvents} events tracked`);
+    }).catch(error => {
+        console.warn('⚠️  Analytics Manager initialization warning:', error.message);
+    });
+} catch (error) {
+    console.warn('⚠️  Analytics Manager initialization failed:', error.message);
 }
 
 // Session storage (in produzione usare Redis o DB)
@@ -2865,6 +2895,633 @@ app.get('/api/schedules/cron-templates', (req, res) => {
         res.status(500).json({
             success: false,
             error: 'Failed to get cron templates',
+            message: error.message
+        });
+    }
+});
+
+// ============================================================================
+// MARKETPLACE API ENDPOINTS
+// ============================================================================
+
+/**
+ * GET /api/marketplace/items
+ * Lista items dal marketplace con filtri
+ */
+app.get('/api/marketplace/items', async (req, res) => {
+    if (!marketplaceManager) {
+        return res.json({
+            success: true,
+            items: [],
+            total: 0,
+            page: 1,
+            pages: 0
+        });
+    }
+
+    try {
+        const filters = {
+            type: req.query.type, // 'agent' | 'workflow'
+            category: req.query.category,
+            tags: req.query.tags ? req.query.tags.split(',') : undefined,
+            featured: req.query.featured === 'true',
+            query: req.query.query,
+            sortBy: req.query.sortBy || 'publishedAt',
+            sortOrder: req.query.sortOrder || 'desc',
+            page: parseInt(req.query.page) || 1,
+            limit: parseInt(req.query.limit) || 20
+        };
+
+        const result = await marketplaceManager.list(filters);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error listing marketplace items:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to list marketplace items',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/marketplace/items/:id
+ * Ottieni dettagli di un item
+ */
+app.get('/api/marketplace/items/:id', async (req, res) => {
+    if (!marketplaceManager) {
+        return res.status(404).json({
+            success: false,
+            error: 'Marketplace not available'
+        });
+    }
+
+    try {
+        const result = await marketplaceManager.getItem(req.params.id);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error getting marketplace item:', error);
+        res.status(404).json({
+            success: false,
+            error: 'Item not found',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/marketplace/publish
+ * Pubblica un agent o workflow nel marketplace
+ */
+app.post('/api/marketplace/publish', async (req, res) => {
+    if (!marketplaceManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Marketplace not available'
+        });
+    }
+
+    try {
+        const result = await marketplaceManager.publish(req.body);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error publishing to marketplace:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to publish item',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * PUT /api/marketplace/items/:id
+ * Aggiorna un item del marketplace
+ */
+app.put('/api/marketplace/items/:id', async (req, res) => {
+    if (!marketplaceManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Marketplace not available'
+        });
+    }
+
+    try {
+        const result = await marketplaceManager.update(req.params.id, req.body);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error updating marketplace item:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to update item',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * DELETE /api/marketplace/items/:id
+ * Elimina un item dal marketplace
+ */
+app.delete('/api/marketplace/items/:id', async (req, res) => {
+    if (!marketplaceManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Marketplace not available'
+        });
+    }
+
+    try {
+        const result = await marketplaceManager.unpublish(req.params.id);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error unpublishing marketplace item:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to unpublish item',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/marketplace/install/:id
+ * Installa un item dal marketplace
+ */
+app.post('/api/marketplace/install/:id', async (req, res) => {
+    if (!marketplaceManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Marketplace not available'
+        });
+    }
+
+    try {
+        const result = await marketplaceManager.install(req.params.id);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error installing from marketplace:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to install item',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/marketplace/items/:id/review
+ * Aggiungi una recensione
+ */
+app.post('/api/marketplace/items/:id/review', async (req, res) => {
+    if (!marketplaceManager) {
+        return res.status(503).json({
+            success: false,
+            error: 'Marketplace not available'
+        });
+    }
+
+    try {
+        const result = await marketplaceManager.addReview(req.params.id, req.body);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error adding review:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to add review',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/marketplace/categories
+ * Ottieni categorie disponibili
+ */
+app.get('/api/marketplace/categories', (req, res) => {
+    if (!marketplaceManager) {
+        return res.json({
+            success: true,
+            categories: []
+        });
+    }
+
+    try {
+        const categories = marketplaceManager.getCategories();
+
+        res.json({
+            success: true,
+            categories: categories
+        });
+
+    } catch (error) {
+        console.error('Error getting categories:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get categories',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/marketplace/stats
+ * Ottieni statistiche marketplace
+ */
+app.get('/api/marketplace/stats', (req, res) => {
+    if (!marketplaceManager) {
+        return res.json({
+            success: true,
+            stats: {
+                total: 0,
+                agents: 0,
+                workflows: 0,
+                featured: 0,
+                totalDownloads: 0,
+                avgRating: 0,
+                byCategory: {},
+                mostDownloaded: [],
+                topRated: []
+            }
+        });
+    }
+
+    try {
+        const stats = marketplaceManager.getStats();
+
+        res.json({
+            success: true,
+            stats: stats
+        });
+
+    } catch (error) {
+        console.error('Error getting marketplace stats:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get marketplace stats',
+            message: error.message
+        });
+    }
+});
+
+// ============================================================================
+// ANALYTICS API ENDPOINTS
+// ============================================================================
+
+/**
+ * POST /api/analytics/track/agent
+ * Track agent execution
+ */
+app.post('/api/analytics/track/agent', async (req, res) => {
+    if (!analyticsManager) {
+        return res.json({
+            success: true,
+            message: 'Analytics not available'
+        });
+    }
+
+    try {
+        const event = await analyticsManager.trackAgentExecution(req.body);
+
+        res.json({
+            success: true,
+            event: event
+        });
+
+    } catch (error) {
+        console.error('Error tracking agent execution:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to track agent execution',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/analytics/track/workflow
+ * Track workflow execution
+ */
+app.post('/api/analytics/track/workflow', async (req, res) => {
+    if (!analyticsManager) {
+        return res.json({
+            success: true,
+            message: 'Analytics not available'
+        });
+    }
+
+    try {
+        const event = await analyticsManager.trackWorkflowExecution(req.body);
+
+        res.json({
+            success: true,
+            event: event
+        });
+
+    } catch (error) {
+        console.error('Error tracking workflow execution:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to track workflow execution',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/analytics/track/webhook
+ * Track webhook trigger
+ */
+app.post('/api/analytics/track/webhook', async (req, res) => {
+    if (!analyticsManager) {
+        return res.json({
+            success: true,
+            message: 'Analytics not available'
+        });
+    }
+
+    try {
+        const event = await analyticsManager.trackWebhookTrigger(req.body);
+
+        res.json({
+            success: true,
+            event: event
+        });
+
+    } catch (error) {
+        console.error('Error tracking webhook trigger:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to track webhook trigger',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/analytics/track/schedule
+ * Track schedule execution
+ */
+app.post('/api/analytics/track/schedule', async (req, res) => {
+    if (!analyticsManager) {
+        return res.json({
+            success: true,
+            message: 'Analytics not available'
+        });
+    }
+
+    try {
+        const event = await analyticsManager.trackScheduleExecution(req.body);
+
+        res.json({
+            success: true,
+            event: event
+        });
+
+    } catch (error) {
+        console.error('Error tracking schedule execution:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to track schedule execution',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/analytics/agents
+ * Get agent statistics
+ */
+app.get('/api/analytics/agents', (req, res) => {
+    if (!analyticsManager) {
+        return res.json({
+            success: true,
+            stats: {
+                total: 0,
+                success: 0,
+                failure: 0,
+                successRate: 0,
+                avgDuration: 0,
+                byAgent: {},
+                recent: []
+            }
+        });
+    }
+
+    try {
+        const timeRange = req.query.timeRange || 'all';
+        const stats = analyticsManager.getAgentStats(timeRange);
+
+        res.json({
+            success: true,
+            stats: stats
+        });
+
+    } catch (error) {
+        console.error('Error getting agent stats:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get agent stats',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/analytics/workflows
+ * Get workflow statistics
+ */
+app.get('/api/analytics/workflows', (req, res) => {
+    if (!analyticsManager) {
+        return res.json({
+            success: true,
+            stats: {
+                total: 0,
+                success: 0,
+                partial: 0,
+                failure: 0,
+                successRate: 0,
+                avgDuration: 0,
+                byWorkflow: {},
+                recent: []
+            }
+        });
+    }
+
+    try {
+        const timeRange = req.query.timeRange || 'all';
+        const stats = analyticsManager.getWorkflowStats(timeRange);
+
+        res.json({
+            success: true,
+            stats: stats
+        });
+
+    } catch (error) {
+        console.error('Error getting workflow stats:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get workflow stats',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/analytics/webhooks
+ * Get webhook statistics
+ */
+app.get('/api/analytics/webhooks', (req, res) => {
+    if (!analyticsManager) {
+        return res.json({
+            success: true,
+            stats: {
+                total: 0,
+                success: 0,
+                skipped: 0,
+                failure: 0,
+                byWebhook: {},
+                byEvent: {},
+                recent: []
+            }
+        });
+    }
+
+    try {
+        const timeRange = req.query.timeRange || 'all';
+        const stats = analyticsManager.getWebhookStats(timeRange);
+
+        res.json({
+            success: true,
+            stats: stats
+        });
+
+    } catch (error) {
+        console.error('Error getting webhook stats:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get webhook stats',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/analytics/schedules
+ * Get schedule statistics
+ */
+app.get('/api/analytics/schedules', (req, res) => {
+    if (!analyticsManager) {
+        return res.json({
+            success: true,
+            stats: {
+                total: 0,
+                success: 0,
+                failure: 0,
+                bySchedule: {},
+                recent: []
+            }
+        });
+    }
+
+    try {
+        const timeRange = req.query.timeRange || 'all';
+        const stats = analyticsManager.getScheduleStats(timeRange);
+
+        res.json({
+            success: true,
+            stats: stats
+        });
+
+    } catch (error) {
+        console.error('Error getting schedule stats:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get schedule stats',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/analytics/dashboard
+ * Get dashboard overview data
+ */
+app.get('/api/analytics/dashboard', (req, res) => {
+    if (!analyticsManager) {
+        return res.json({
+            success: true,
+            data: {
+                timeRange: 'today',
+                agents: { total: 0, success: 0, failure: 0, successRate: 0, avgDuration: 0, byAgent: {}, recent: [] },
+                workflows: { total: 0, success: 0, partial: 0, failure: 0, successRate: 0, avgDuration: 0, byWorkflow: {}, recent: [] },
+                webhooks: { total: 0, success: 0, skipped: 0, failure: 0, byWebhook: {}, byEvent: {}, recent: [] },
+                schedules: { total: 0, success: 0, failure: 0, bySchedule: {}, recent: [] },
+                summary: { totalExecutions: 0, totalSuccesses: 0, totalFailures: 0 }
+            }
+        });
+    }
+
+    try {
+        const timeRange = req.query.timeRange || 'today';
+        const data = analyticsManager.getDashboardOverview(timeRange);
+
+        res.json({
+            success: true,
+            data: data
+        });
+
+    } catch (error) {
+        console.error('Error getting dashboard overview:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get dashboard overview',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/analytics/timeseries
+ * Get time series data for charts
+ */
+app.get('/api/analytics/timeseries', (req, res) => {
+    if (!analyticsManager) {
+        return res.json({
+            success: true,
+            data: []
+        });
+    }
+
+    try {
+        const period = req.query.period || 'daily';
+        const days = parseInt(req.query.days) || 7;
+        const data = analyticsManager.getTimeSeries(period, days);
+
+        res.json({
+            success: true,
+            data: data
+        });
+
+    } catch (error) {
+        console.error('Error getting time series data:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get time series data',
             message: error.message
         });
     }

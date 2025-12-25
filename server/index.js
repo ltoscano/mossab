@@ -10,6 +10,7 @@ const WorkflowManager = require('./workflow-manager');
 const WebhookManager = require('./webhook-manager');
 const SchedulerManager = require('./scheduler-manager');
 const MarketplaceManager = require('./marketplace-manager');
+const MarketplaceClient = require('./marketplace-client');
 const AnalyticsManager = require('./analytics-manager');
 
 const app = express();
@@ -107,6 +108,32 @@ try {
     });
 } catch (error) {
     console.warn('⚠️  Marketplace Manager initialization failed:', error.message);
+}
+
+// Inizializza Marketplace Client per remote marketplace (opzionale)
+let marketplaceClient = null;
+const MARKETPLACE_URL = process.env.MARKETPLACE_URL;
+const MARKETPLACE_API_KEY = process.env.MARKETPLACE_API_KEY;
+
+if (MARKETPLACE_URL) {
+    try {
+        marketplaceClient = new MarketplaceClient(MARKETPLACE_URL, MARKETPLACE_API_KEY);
+        // Test connection
+        marketplaceClient.healthCheck().then(health => {
+            if (health.success) {
+                console.log(`✅ Marketplace Client connected to ${MARKETPLACE_URL}`);
+                console.log(`🔐 Authentication: ${MARKETPLACE_API_KEY ? 'Configured' : 'Anonymous (read-only)'}`);
+            } else {
+                console.warn(`⚠️  Marketplace server not reachable: ${health.error}`);
+            }
+        }).catch(error => {
+            console.warn(`⚠️  Marketplace connection failed: ${error.message}`);
+        });
+    } catch (error) {
+        console.warn('⚠️  Marketplace Client initialization failed:', error.message);
+    }
+} else {
+    console.log('📦 Marketplace: Local mode (set MARKETPLACE_URL for remote marketplace)');
 }
 
 // Inizializza Analytics Manager per metrics tracking
@@ -3212,6 +3239,299 @@ app.delete('/api/workflows/:name/versions/:version', async (req, res) => {
 // ============================================================================
 // MARKETPLACE API ENDPOINTS
 // ============================================================================
+
+/**
+ * GET /api/marketplace/config
+ * Restituisce la configurazione del marketplace (local vs remote)
+ */
+app.get('/api/marketplace/config', (req, res) => {
+    res.json({
+        success: true,
+        mode: marketplaceClient ? 'remote' : 'local',
+        remoteUrl: MARKETPLACE_URL || null,
+        authenticated: !!MARKETPLACE_API_KEY,
+        features: {
+            publish: marketplaceClient ? !!MARKETPLACE_API_KEY : true,
+            browse: true,
+            download: true,
+            rate: marketplaceClient ? !!MARKETPLACE_API_KEY : false,
+            register: !!marketplaceClient,
+            login: !!marketplaceClient
+        }
+    });
+});
+
+/**
+ * POST /api/marketplace/register
+ * Registra nuovo utente sul marketplace remoto
+ */
+app.post('/api/marketplace/register', async (req, res) => {
+    if (!marketplaceClient) {
+        return res.status(400).json({
+            success: false,
+            error: 'Remote marketplace not configured. Registration only available in remote mode.'
+        });
+    }
+
+    try {
+        const { username, email, password } = req.body;
+
+        if (!username || !email || !password) {
+            return res.status(400).json({
+                success: false,
+                error: 'Username, email, and password are required'
+            });
+        }
+
+        const result = await marketplaceClient.register(username, email, password);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error registering user:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Registration failed',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/marketplace/login
+ * Login utente sul marketplace remoto (ottieni API key)
+ */
+app.post('/api/marketplace/login', async (req, res) => {
+    if (!marketplaceClient) {
+        return res.status(400).json({
+            success: false,
+            error: 'Remote marketplace not configured. Login only available in remote mode.'
+        });
+    }
+
+    try {
+        const { username, password } = req.body;
+
+        if (!username || !password) {
+            return res.status(400).json({
+                success: false,
+                error: 'Username and password are required'
+            });
+        }
+
+        const result = await marketplaceClient.login(username, password);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error logging in:', error);
+        res.status(401).json({
+            success: false,
+            error: 'Login failed',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/marketplace/remote/items
+ * Browse items dal marketplace remoto
+ */
+app.get('/api/marketplace/remote/items', async (req, res) => {
+    if (!marketplaceClient) {
+        return res.status(400).json({
+            success: false,
+            error: 'Remote marketplace not configured'
+        });
+    }
+
+    try {
+        const filters = {
+            type: req.query.type,
+            category: req.query.category,
+            search: req.query.search,
+            sortBy: req.query.sortBy,
+            order: req.query.order,
+            limit: parseInt(req.query.limit) || 20,
+            offset: parseInt(req.query.offset) || 0
+        };
+
+        const result = await marketplaceClient.browse(filters);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error browsing remote marketplace:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to browse remote marketplace',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/marketplace/remote/publish
+ * Pubblica item sul marketplace remoto
+ */
+app.post('/api/marketplace/remote/publish', async (req, res) => {
+    if (!marketplaceClient) {
+        return res.status(400).json({
+            success: false,
+            error: 'Remote marketplace not configured'
+        });
+    }
+
+    if (!MARKETPLACE_API_KEY) {
+        return res.status(401).json({
+            success: false,
+            error: 'API key required to publish. Please login first.'
+        });
+    }
+
+    try {
+        const result = await marketplaceClient.publish(req.body);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error publishing to remote marketplace:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to publish to remote marketplace',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/marketplace/remote/items/:id
+ * Ottieni dettagli item dal marketplace remoto
+ */
+app.get('/api/marketplace/remote/items/:id', async (req, res) => {
+    if (!marketplaceClient) {
+        return res.status(400).json({
+            success: false,
+            error: 'Remote marketplace not configured'
+        });
+    }
+
+    try {
+        const result = await marketplaceClient.getItem(req.params.id);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error getting remote item:', error);
+        res.status(404).json({
+            success: false,
+            error: 'Item not found',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/marketplace/remote/items/:id/download
+ * Download item dal marketplace remoto e installa localmente
+ */
+app.post('/api/marketplace/remote/items/:id/download', async (req, res) => {
+    if (!marketplaceClient) {
+        return res.status(400).json({
+            success: false,
+            error: 'Remote marketplace not configured'
+        });
+    }
+
+    try {
+        const downloadResult = await marketplaceClient.download(req.params.id);
+
+        // Installa localmente l'item scaricato
+        if (downloadResult.success && downloadResult.item) {
+            const item = downloadResult.item;
+
+            if (item.type === 'agent' && agentManager) {
+                // Installa agent localmente
+                await agentManager.createCustomAgent(item.content);
+            } else if (item.type === 'workflow' && workflowManager) {
+                // Installa workflow localmente
+                await workflowManager.createWorkflow(item.content);
+            }
+        }
+
+        res.json(downloadResult);
+
+    } catch (error) {
+        console.error('Error downloading from remote marketplace:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to download item',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/marketplace/remote/items/:id/rate
+ * Vota item sul marketplace remoto
+ */
+app.post('/api/marketplace/remote/items/:id/rate', async (req, res) => {
+    if (!marketplaceClient) {
+        return res.status(400).json({
+            success: false,
+            error: 'Remote marketplace not configured'
+        });
+    }
+
+    if (!MARKETPLACE_API_KEY) {
+        return res.status(401).json({
+            success: false,
+            error: 'API key required to rate items. Please login first.'
+        });
+    }
+
+    try {
+        const { rating, review } = req.body;
+        const result = await marketplaceClient.rate(req.params.id, rating, review);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error rating item:', error);
+        res.status(400).json({
+            success: false,
+            error: 'Failed to rate item',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * GET /api/marketplace/remote/stats
+ * Statistiche dal marketplace remoto
+ */
+app.get('/api/marketplace/remote/stats', async (req, res) => {
+    if (!marketplaceClient) {
+        return res.status(400).json({
+            success: false,
+            error: 'Remote marketplace not configured'
+        });
+    }
+
+    try {
+        const result = await marketplaceClient.getStats();
+
+        res.json(result);
+
+    } catch (error) {
+        console.error('Error getting remote stats:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get marketplace stats',
+            message: error.message
+        });
+    }
+});
 
 /**
  * GET /api/marketplace/items

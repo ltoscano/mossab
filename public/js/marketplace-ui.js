@@ -16,6 +16,15 @@ class MarketplaceUI {
             page: 1
         };
 
+        // Remote marketplace configuration
+        this.config = {
+            mode: 'local', // 'local' or 'remote'
+            remoteUrl: null,
+            authenticated: false,
+            features: {}
+        };
+        this.apiKey = localStorage.getItem('marketplace_api_key') || null;
+
         this.initializeEventListeners();
     }
 
@@ -83,9 +92,45 @@ class MarketplaceUI {
         const modal = document.querySelector('.marketplace-modal');
         if (modal) {
             modal.classList.remove('hidden');
+            await this.loadConfig();
+            this.updateModeIndicator();
             await this.loadCategories();
             await this.loadStats();
             await this.loadItems();
+        }
+    }
+
+    async loadConfig() {
+        try {
+            const response = await fetch('/api/marketplace/config');
+            const data = await response.json();
+
+            if (data.success) {
+                this.config = data;
+                // Update auth status if we have a saved API key
+                if (this.apiKey && this.config.mode === 'remote') {
+                    this.config.authenticated = true;
+                }
+            }
+        } catch (error) {
+            console.error('Error loading marketplace config:', error);
+        }
+    }
+
+    updateModeIndicator() {
+        const indicator = document.querySelector('.marketplace-mode-indicator');
+        if (!indicator) return;
+
+        if (this.config.mode === 'remote') {
+            indicator.innerHTML = `
+                <span class="mode-badge remote">🌐 Remote: ${this.config.remoteUrl}</span>
+                ${this.config.authenticated ?
+                    '<span class="auth-badge authenticated">✓ Authenticated</span>' :
+                    '<span class="auth-badge">Login to publish</span>'
+                }
+            `;
+        } else {
+            indicator.innerHTML = '<span class="mode-badge local">📦 Local Marketplace</span>';
         }
     }
 
@@ -172,13 +217,18 @@ class MarketplaceUI {
 
             if (this.currentFilters.type) queryParams.set('type', this.currentFilters.type);
             if (this.currentFilters.category) queryParams.set('category', this.currentFilters.category);
-            if (this.currentFilters.query) queryParams.set('query', this.currentFilters.query);
+            if (this.currentFilters.query) queryParams.set('query', this.currentFilters.query || this.currentFilters.search);
             if (this.currentFilters.featured) queryParams.set('featured', 'true');
             queryParams.set('sortBy', this.currentFilters.sortBy);
             queryParams.set('sortOrder', this.currentFilters.sortOrder);
             queryParams.set('page', this.currentFilters.page);
 
-            const response = await fetch(`/api/marketplace/items?${queryParams}`);
+            // Use remote endpoint if configured
+            const endpoint = this.config.mode === 'remote'
+                ? `/api/marketplace/remote/items?${queryParams}`
+                : `/api/marketplace/items?${queryParams}`;
+
+            const response = await fetch(endpoint);
             const data = await response.json();
 
             if (data.success) {
@@ -447,12 +497,23 @@ class MarketplaceUI {
             const configData = await configResponse.json();
             itemData.content = configData.success ? configData.agent || configData.workflow : {};
 
-            // Publish to marketplace
-            const response = await fetch('/api/marketplace/publish', {
+            // Publish to marketplace (use remote endpoint if configured)
+            const publishEndpoint = this.config.mode === 'remote'
+                ? '/api/marketplace/remote/publish'
+                : '/api/marketplace/publish';
+
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+
+            // Add API key if in remote mode
+            if (this.config.mode === 'remote' && this.apiKey) {
+                headers['X-API-Key'] = this.apiKey;
+            }
+
+            const response = await fetch(publishEndpoint, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers,
                 body: JSON.stringify(itemData)
             });
 
@@ -534,6 +595,73 @@ class MarketplaceUI {
                 </div>
             ` : ''}
         `;
+    }
+
+    async login(username, password) {
+        try {
+            const response = await fetch('/api/marketplace/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+
+            const data = await response.json();
+
+            if (data.success && data.user) {
+                this.apiKey = data.user.api_key;
+                localStorage.setItem('marketplace_api_key', this.apiKey);
+                localStorage.setItem('marketplace_username', data.user.username);
+                this.config.authenticated = true;
+                this.updateModeIndicator();
+                this.showToast('Login successful!', 'success');
+                return true;
+            } else {
+                this.showToast(data.error || 'Login failed', 'error');
+                return false;
+            }
+        } catch (error) {
+            console.error('Login error:', error);
+            this.showToast('Login failed: ' + error.message, 'error');
+            return false;
+        }
+    }
+
+    async register(username, email, password) {
+        try {
+            const response = await fetch('/api/marketplace/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, email, password })
+            });
+
+            const data = await response.json();
+
+            if (data.success && data.user) {
+                this.apiKey = data.user.api_key;
+                localStorage.setItem('marketplace_api_key', this.apiKey);
+                localStorage.setItem('marketplace_username', data.user.username);
+                this.config.authenticated = true;
+                this.updateModeIndicator();
+                this.showToast('Registration successful! API key saved.', 'success');
+                return true;
+            } else {
+                this.showToast(data.error || 'Registration failed', 'error');
+                return false;
+            }
+        } catch (error) {
+            console.error('Registration error:', error);
+            this.showToast('Registration failed: ' + error.message, 'error');
+            return false;
+        }
+    }
+
+    logout() {
+        this.apiKey = null;
+        localStorage.removeItem('marketplace_api_key');
+        localStorage.removeItem('marketplace_username');
+        this.config.authenticated = false;
+        this.updateModeIndicator();
+        this.showToast('Logged out successfully', 'success');
     }
 
     escapeHtml(text) {

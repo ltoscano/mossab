@@ -160,9 +160,11 @@ class WorkflowsUI {
     this.workflows.forEach(workflow => {
       const executeBtn = document.getElementById(`execute-${workflow.name}`);
       const deleteBtn = document.getElementById(`delete-workflow-${workflow.name}`);
+      const versionBtn = document.querySelector(`.workflow-versions-btn[data-workflow="${workflow.name}"]`);
 
       executeBtn?.addEventListener('click', () => this.executeWorkflow(workflow.name));
       deleteBtn?.addEventListener('click', () => this.deleteWorkflow(workflow.name));
+      versionBtn?.addEventListener('click', () => this.showVersionsModal(workflow.name));
     });
   }
 
@@ -185,6 +187,7 @@ class WorkflowsUI {
           </ol>
         </div>
         <div class="workflow-actions">
+          <button class="workflow-versions-btn" data-workflow="${workflow.name}">📋 Versions</button>
           <button class="btn-primary" id="execute-${workflow.name}">▶ Execute</button>
           <button class="btn-danger" id="delete-workflow-${workflow.name}">Delete</button>
         </div>
@@ -467,6 +470,272 @@ class WorkflowsUI {
       }
     } catch (error) {
       this.showError('Error reloading workflows: ' + error.message);
+    }
+  }
+
+  async showVersionsModal(workflowName) {
+    // Create modal HTML
+    const modalHtml = `
+      <div id="versionsModal" class="version-modal">
+        <div class="version-modal-content">
+          <div class="version-modal-header">
+            <h2>Versions: ${workflowName}</h2>
+            <button class="version-modal-close">&times;</button>
+          </div>
+          <div class="version-modal-body">
+            <div class="version-tabs">
+              <button class="active" data-vtab="list">Version List</button>
+              <button data-vtab="create">Create Version</button>
+            </div>
+            <div class="version-tab-content" id="versionTabList">
+              <div id="versionsListContainer">Loading...</div>
+            </div>
+            <div class="version-tab-content hidden" id="versionTabCreate">
+              <form id="versionCreateForm">
+                <div class="form-group">
+                  <label>Version Number</label>
+                  <input type="text" id="versionNumber" placeholder="1.0.0" required />
+                  <small>Use semantic versioning (e.g., 1.0.0, 2.1.0)</small>
+                </div>
+                <div class="form-group">
+                  <label>Tag</label>
+                  <select id="versionTag">
+                    <option value="stable">Stable</option>
+                    <option value="beta">Beta</option>
+                    <option value="alpha">Alpha</option>
+                    <option value="experimental">Experimental</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label>Changelog</label>
+                  <textarea id="versionChangelog" rows="4" placeholder="What changed in this version?"></textarea>
+                </div>
+                <div class="form-group">
+                  <label>
+                    <input type="checkbox" id="versionSetCurrent" />
+                    Set as current version
+                  </label>
+                </div>
+                <button type="submit" class="btn-primary">Create Version</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Add modal to body
+    const existingModal = document.getElementById('versionsModal');
+    if (existingModal) {
+      existingModal.remove();
+    }
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+    // Get modal elements
+    const modal = document.getElementById('versionsModal');
+    const closeBtn = modal.querySelector('.version-modal-close');
+
+    // Setup event listeners
+    closeBtn.addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) modal.remove();
+    });
+
+    // Tab switching
+    const tabs = modal.querySelectorAll('.version-tabs button');
+    tabs.forEach(tab => {
+      tab.addEventListener('click', (e) => {
+        const vtabName = e.target.dataset.vtab;
+
+        // Update active tab
+        tabs.forEach(t => t.classList.remove('active'));
+        e.target.classList.add('active');
+
+        // Show/hide content
+        const contents = modal.querySelectorAll('.version-tab-content');
+        contents.forEach(content => {
+          if (content.id === `versionTab${vtabName.charAt(0).toUpperCase() + vtabName.slice(1)}`) {
+            content.classList.remove('hidden');
+          } else {
+            content.classList.add('hidden');
+          }
+        });
+      });
+    });
+
+    // Create version form
+    const createForm = document.getElementById('versionCreateForm');
+    createForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      await this.createWorkflowVersion(workflowName, modal);
+    });
+
+    // Load versions
+    await this.loadWorkflowVersions(workflowName, modal);
+  }
+
+  async loadWorkflowVersions(workflowName, modal) {
+    try {
+      const response = await fetch(`/api/workflows/${workflowName}/versions`);
+      const data = await response.json();
+
+      if (data.success) {
+        this.renderVersionsList(workflowName, data, modal);
+      } else {
+        this.showError('Failed to load versions');
+      }
+    } catch (error) {
+      this.showError('Error loading versions: ' + error.message);
+    }
+  }
+
+  renderVersionsList(workflowName, data, modal) {
+    const container = modal.querySelector('#versionsListContainer');
+    if (!container) return;
+
+    const versions = data.versions || [];
+    const currentVersion = data.currentVersion;
+    const latestVersion = data.latestVersion;
+
+    if (versions.length === 0) {
+      container.innerHTML = '<p class="no-data">No versions yet. Create your first version!</p>';
+      return;
+    }
+
+    let html = `
+      <div class="version-info">
+        <p><strong>Current Version:</strong> ${currentVersion || 'None'}</p>
+        <p><strong>Latest Version:</strong> ${latestVersion || 'None'}</p>
+      </div>
+      <div class="versions-list">
+    `;
+
+    versions.forEach(version => {
+      const isCurrent = version.version === currentVersion;
+      const isLatest = version.version === latestVersion;
+
+      html += `
+        <div class="version-item ${isCurrent ? 'current' : ''}">
+          <div class="version-header">
+            <h4>v${version.version}</h4>
+            <div class="version-badges">
+              ${isCurrent ? '<span class="badge badge-current">Current</span>' : ''}
+              ${isLatest ? '<span class="badge badge-latest">Latest</span>' : ''}
+              <span class="badge badge-${version.tag}">${version.tag}</span>
+            </div>
+          </div>
+          <p class="version-meta">Created: ${new Date(version.createdAt).toLocaleString()}</p>
+          ${version.changelog ? `<p class="version-changelog">${version.changelog}</p>` : ''}
+          <div class="version-actions">
+            ${!isCurrent ? `<button class="btn-switch" onclick="workflowsUI.switchWorkflowVersion('${workflowName}', '${version.version}')">Switch to this</button>` : ''}
+            ${!isCurrent ? `<button class="btn-delete" onclick="workflowsUI.deleteWorkflowVersion('${workflowName}', '${version.version}')">Delete</button>` : ''}
+          </div>
+        </div>
+      `;
+    });
+
+    html += '</div>';
+    container.innerHTML = html;
+  }
+
+  async createWorkflowVersion(workflowName, modal) {
+    const version = document.getElementById('versionNumber')?.value;
+    const tag = document.getElementById('versionTag')?.value;
+    const changelog = document.getElementById('versionChangelog')?.value;
+    const setCurrent = document.getElementById('versionSetCurrent')?.checked;
+
+    if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
+      this.showError('Invalid version format. Use semantic versioning (e.g., 1.0.0)');
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/workflows/${workflowName}/versions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          version,
+          tag,
+          changelog,
+          setAsCurrent: setCurrent,
+          setAsLatest: true
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        this.showSuccess(`Version ${version} created successfully!`);
+        document.getElementById('versionCreateForm')?.reset();
+        await this.loadWorkflowVersions(workflowName, modal);
+
+        // Switch to list tab
+        const listTab = modal.querySelector('[data-vtab="list"]');
+        listTab?.click();
+      } else {
+        this.showError(data.error || 'Failed to create version');
+      }
+    } catch (error) {
+      this.showError('Error creating version: ' + error.message);
+    }
+  }
+
+  async switchWorkflowVersion(workflowName, version) {
+    if (!confirm(`Switch to version ${version}? This will update the active workflow configuration.`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/workflows/${workflowName}/versions/${version}/switch`, {
+        method: 'POST'
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        this.showSuccess(`Switched to version ${version}`);
+
+        // Reload versions modal
+        const modal = document.getElementById('versionsModal');
+        if (modal) {
+          await this.loadWorkflowVersions(workflowName, modal);
+        }
+
+        // Reload workflows list
+        await this.loadWorkflows();
+      } else {
+        this.showError(data.error || 'Failed to switch version');
+      }
+    } catch (error) {
+      this.showError('Error switching version: ' + error.message);
+    }
+  }
+
+  async deleteWorkflowVersion(workflowName, version) {
+    if (!confirm(`Delete version ${version}? This cannot be undone.`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/workflows/${workflowName}/versions/${version}`, {
+        method: 'DELETE'
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        this.showSuccess(`Version ${version} deleted`);
+
+        // Reload versions modal
+        const modal = document.getElementById('versionsModal');
+        if (modal) {
+          await this.loadWorkflowVersions(workflowName, modal);
+        }
+      } else {
+        this.showError(data.error || 'Failed to delete version');
+      }
+    } catch (error) {
+      this.showError('Error deleting version: ' + error.message);
     }
   }
 

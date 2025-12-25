@@ -51,6 +51,20 @@
                     </div>
                 </div>
                 <div class="header-right">
+                    <button class="icon-btn" id="agentsBtn" title="Agents & Workflows">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M12 1v6m0 6v6"></path>
+                            <path d="M17 7l-5 5m0 0l-5-5m5 5l5 5m-5-5l-5 5"></path>
+                        </svg>
+                    </button>
+                    <button class="icon-btn" id="workflowsBtn" title="Workflows">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2v6m0 0l4 4m-4-4L8 12"></path>
+                            <path d="M8 12l-4 4m4-4l4 4m-4-4v6"></path>
+                            <path d="M16 12l4 4m-4-4v6"></path>
+                        </svg>
+                    </button>
                     <button class="icon-btn" id="projectBtn" title="Project Context">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>
@@ -433,6 +447,224 @@
         </div>
     </div>
 
+    <!-- Agents Management Modal -->
+    <div class="agents-modal hidden" id="agentsModal">
+        <div class="agents-modal-overlay" id="agentsModalOverlay"></div>
+        <div class="agents-modal-content">
+            <div class="agents-modal-header">
+                <h2>🤖 Agent Management</h2>
+                <button class="agents-modal-close" id="agentsModalClose">×</button>
+            </div>
+
+            <div class="agents-tabs">
+                <button class="agents-tab active" data-tab="list">Agents List</button>
+                <button class="agents-tab" data-tab="create">Create Agent</button>
+                <button class="agents-tab" data-tab="templates">Templates</button>
+                <button class="agents-tab" data-tab="stats">Stats</button>
+            </div>
+
+            <div class="agents-modal-body">
+                <!-- Tab: Agents List -->
+                <div class="agents-tab-content active" id="agentsTabList">
+                    <div class="agents-stats-overview">
+                        <div class="agents-stat-card">
+                            <span class="agents-stat-value" id="agentsTotalCount">0</span>
+                            <span class="agents-stat-label">Total Agents</span>
+                        </div>
+                        <div class="agents-stat-card">
+                            <span class="agents-stat-value" id="agentsBuiltinCount">0</span>
+                            <span class="agents-stat-label">Built-in</span>
+                        </div>
+                        <div class="agents-stat-card">
+                            <span class="agents-stat-value" id="agentsCustomCount">0</span>
+                            <span class="agents-stat-label">Custom</span>
+                        </div>
+                    </div>
+
+                    <div id="agentsList" class="agents-list">
+                        <div class="agents-loading">Loading agents...</div>
+                    </div>
+                </div>
+
+                <!-- Tab: Create Agent -->
+                <div class="agents-tab-content" id="agentsTabCreate">
+                    <form id="agentCreateForm" class="agent-form">
+                        <div class="agent-form-group">
+                            <label for="agentName">Agent Name *</label>
+                            <input type="text" id="agentName" placeholder="my-custom-agent" required pattern="[a-z0-9-]+" />
+                            <small>Lowercase letters, numbers, and hyphens only</small>
+                        </div>
+
+                        <div class="agent-form-group">
+                            <label for="agentDescription">Description *</label>
+                            <input type="text" id="agentDescription" placeholder="What does this agent do?" required />
+                        </div>
+
+                        <div class="agent-form-row">
+                            <div class="agent-form-group">
+                                <label for="agentModel">Model</label>
+                                <select id="agentModel">
+                                    <option value="haiku">Haiku (Fast & Cheap)</option>
+                                    <option value="sonnet" selected>Sonnet (Balanced)</option>
+                                    <option value="opus">Opus (Powerful)</option>
+                                </select>
+                            </div>
+
+                            <div class="agent-form-group">
+                                <label for="agentThoroughness">Thoroughness</label>
+                                <select id="agentThoroughness">
+                                    <option value="quick">Quick</option>
+                                    <option value="medium" selected>Medium</option>
+                                    <option value="very-thorough">Very Thorough</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="agent-form-group">
+                            <label for="agentTools">Tools (comma-separated)</label>
+                            <input type="text" id="agentTools" value="read, grep, glob" placeholder="read, write, grep, glob, bash" />
+                            <small>Available: read, write, edit, grep, glob, bash, git_*</small>
+                        </div>
+
+                        <div class="agent-form-group">
+                            <label for="agentSystemPrompt">System Prompt *</label>
+                            <textarea id="agentSystemPrompt" rows="6" placeholder="You are an expert at..." required></textarea>
+                            <small>Detailed instructions for the agent's behavior</small>
+                        </div>
+
+                        <button type="submit" class="agent-create-btn">Create Agent</button>
+                    </form>
+                </div>
+
+                <!-- Tab: Templates -->
+                <div class="agents-tab-content" id="agentsTabTemplates">
+                    <p class="agents-templates-desc">Use pre-built templates to quickly create specialized agents</p>
+                    <div class="agents-templates-grid">
+                        <div class="agent-template-card" data-template="code-analyzer">
+                            <div class="agent-template-icon">🔍</div>
+                            <h3>Code Analyzer</h3>
+                            <p>Analyzes code for patterns, smells, and best practices</p>
+                            <button class="agent-template-use-btn">Use Template</button>
+                        </div>
+                        <div class="agent-template-card" data-template="api-designer">
+                            <div class="agent-template-icon">🎨</div>
+                            <h3>API Designer</h3>
+                            <p>Designs RESTful APIs with OpenAPI specs</p>
+                            <button class="agent-template-use-btn">Use Template</button>
+                        </div>
+                        <div class="agent-template-card" data-template="bug-hunter">
+                            <div class="agent-template-icon">🐛</div>
+                            <h3>Bug Hunter</h3>
+                            <p>Finds bugs, edge cases, and potential issues</p>
+                            <button class="agent-template-use-btn">Use Template</button>
+                        </div>
+                        <div class="agent-template-card" data-template="refactoring-assistant">
+                            <div class="agent-template-icon">♻️</div>
+                            <h3>Refactoring Assistant</h3>
+                            <p>Suggests refactoring opportunities</p>
+                            <button class="agent-template-use-btn">Use Template</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab: Stats -->
+                <div class="agents-tab-content" id="agentsTabStats">
+                    <div id="agentsStats">
+                        <div class="agents-loading">Loading stats...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="agents-modal-footer">
+                <div class="agents-info">
+                    📁 Agents directory: <code>.mossab/agents/</code>
+                </div>
+                <button class="agents-reload-btn" id="agentsReloadBtn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"></path>
+                    </svg>
+                    Reload Agents
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Workflows Management Modal -->
+    <div class="workflows-modal hidden" id="workflowsModal">
+        <div class="workflows-modal-overlay" id="workflowsModalOverlay"></div>
+        <div class="workflows-modal-content">
+            <div class="workflows-modal-header">
+                <h2>🔄 Workflow Management</h2>
+                <button class="workflows-modal-close" id="workflowsModalClose">×</button>
+            </div>
+
+            <div class="workflows-tabs">
+                <button class="workflows-tab active" data-tab="list">Workflows</button>
+                <button class="workflows-tab" data-tab="create">Create Workflow</button>
+                <button class="workflows-tab" data-tab="results">Results</button>
+            </div>
+
+            <div class="workflows-modal-body">
+                <!-- Tab: Workflows List -->
+                <div class="workflows-tab-content active" id="workflowsTabList">
+                    <div class="workflows-count">
+                        <span id="workflowsCount">0</span> workflows available
+                    </div>
+
+                    <div id="workflowsList" class="workflows-list">
+                        <div class="workflows-loading">Loading workflows...</div>
+                    </div>
+                </div>
+
+                <!-- Tab: Create Workflow -->
+                <div class="workflows-tab-content" id="workflowsTabCreate">
+                    <form id="workflowCreateForm" class="workflow-form">
+                        <div class="workflow-form-group">
+                            <label for="workflowName">Workflow Name *</label>
+                            <input type="text" id="workflowName" placeholder="my-workflow" required pattern="[a-z0-9-]+" />
+                        </div>
+
+                        <div class="workflow-form-group">
+                            <label for="workflowDescription">Description *</label>
+                            <input type="text" id="workflowDescription" placeholder="What does this workflow do?" required />
+                        </div>
+
+                        <div class="workflow-steps-section">
+                            <h3>Workflow Steps</h3>
+                            <div id="workflowSteps">
+                                <!-- Steps will be added here -->
+                            </div>
+                            <button type="button" class="workflow-add-step-btn" id="workflowAddStepBtn">+ Add Step</button>
+                        </div>
+
+                        <button type="submit" class="workflow-create-btn">Create Workflow</button>
+                    </form>
+                </div>
+
+                <!-- Tab: Results -->
+                <div class="workflows-tab-content" id="workflowsTabResults">
+                    <div id="workflowResults">
+                        <div class="workflows-no-results">No workflow executions yet</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="workflows-modal-footer">
+                <div class="workflows-info">
+                    📁 Workflows directory: <code>.mossab/workflows/</code>
+                </div>
+                <button class="workflows-reload-btn" id="workflowsReloadBtn">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0118.8-4.3M22 12.5a10 10 0 01-18.8 4.2"></path>
+                    </svg>
+                    Reload Workflows
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script src="/js/app.js"></script>
+    <script src="/js/agents-ui.js"></script>
+    <script src="/js/workflows-ui.js"></script>
 </body>
 </html>

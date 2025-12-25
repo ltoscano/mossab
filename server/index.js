@@ -1587,6 +1587,45 @@ app.get('/api/agents', (req, res) => {
 });
 
 /**
+ * GET /api/agents/stats
+ * Ottieni statistiche di utilizzo agents
+ */
+app.get('/api/agents/stats', (req, res) => {
+    if (!agentManager) {
+        return res.json({
+            success: true,
+            stats: {
+                totalExecutions: 0,
+                successfulExecutions: 0,
+                failedExecutions: 0,
+                successRate: '0%',
+                totalDuration: '0s',
+                averageDuration: '0s',
+                agentUsage: {},
+                mostUsedAgent: null
+            }
+        });
+    }
+
+    try {
+        const stats = agentManager.getStats();
+
+        res.json({
+            success: true,
+            stats: stats
+        });
+
+    } catch (error) {
+        console.error('Error getting agent stats:', error);
+        res.status(500).json({
+            success: false,
+            error: 'Failed to get stats',
+            message: error.message
+        });
+    }
+});
+
+/**
  * GET /api/agents/:name
  * Ottieni info dettagliate su un agent specifico
  */
@@ -1728,34 +1767,6 @@ app.post('/api/agents/reload', async (req, res) => {
         console.error('Error reloading agents:', error);
         res.status(500).json({
             error: 'Failed to reload agents',
-            message: error.message
-        });
-    }
-});
-
-/**
- * GET /api/agents/stats
- * Ottieni statistiche di utilizzo agents
- */
-app.get('/api/agents/stats', (req, res) => {
-    if (!agentManager) {
-        return res.json({
-            totalExecutions: 0,
-            message: 'Agent system not available'
-        });
-    }
-
-    try {
-        const stats = agentManager.getStats();
-
-        res.json({
-            stats: stats
-        });
-
-    } catch (error) {
-        console.error('Error getting agent stats:', error);
-        res.status(500).json({
-            error: 'Failed to get stats',
             message: error.message
         });
     }

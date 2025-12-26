@@ -53,12 +53,17 @@ class ClaudeService {
         }
 
         // Esponi anche client Anthropic per ContextManager (summarization)
-        // Se usiamo LiteLLM, creiamo un client Anthropic separato per summarization
-        if (this.provider === 'litellm' && process.env.ANTHROPIC_API_KEY) {
-            this.anthropic = new Anthropic({
-                apiKey: process.env.ANTHROPIC_API_KEY
-            });
+        // Se usiamo LiteLLM, creiamo un client Anthropic separato per summarization (opzionale)
+        const anthropicKey = process.env.ANTHROPIC_API_KEY;
+        const isValidAnthropicKey = anthropicKey &&
+            anthropicKey.startsWith('sk-ant-') &&
+            anthropicKey.length > 20;
+
+        if (this.provider === 'litellm') {
+            // LiteLLM mode - usa Anthropic per summarization solo se key valida
+            this.anthropic = isValidAnthropicKey ? new Anthropic({ apiKey: anthropicKey }) : null;
         } else {
+            // Anthropic direct mode
             this.anthropic = this.client;
         }
 
@@ -682,7 +687,7 @@ ${this.cachedProjectContextAddition}`;
             console.log(`🔄 LiteLLM Request (model: ${selectedModel}, complexity: ${complexity})`);
 
             // Costruisci messaggi in formato OpenAI
-            const messages = [
+            let messages = [
                 { role: 'system', content: this.getSystemPrompt() },
                 ...conversationHistory.map(msg => ({
                     role: msg.role,
@@ -694,31 +699,65 @@ ${this.cachedProjectContextAddition}`;
             // Converti tools in formato OpenAI
             const tools = this.convertToolsToOpenAI(this.getTools());
 
-            // Chiamata a LiteLLM (formato OpenAI)
-            const response = await this.client.chat.completions.create({
-                model: selectedModel,
-                messages: messages,
-                max_tokens: this.maxTokens,
-                temperature: 0.7,
-                tools: this.enableToolUse && tools.length > 0 ? tools : undefined
-            });
+            let finalResponse = '';
+            let allToolsUsed = [];
+            let totalUsage = { input_tokens: 0, output_tokens: 0 };
+            let lastModel = null;
 
-            const choice = response.choices[0];
-            let finalResponse = choice.message.content || '';
-            const toolCalls = choice.message.tool_calls || [];
+            // Loop per gestire multiple rounds di tool calls
+            const MAX_TOOL_ROUNDS = 50; // Alto limite, utente può sempre stoppare
+            let round = 0;
 
-            console.log('📥 LiteLLM Response:', {
-                model: response.model,
-                finishReason: choice.finish_reason,
-                toolCalls: toolCalls.length
-            });
+            while (round < MAX_TOOL_ROUNDS) {
+                round++;
+                console.log(`🔄 LiteLLM Round ${round}`);
 
-            // Se ci sono tool calls, eseguili
-            if (toolCalls.length > 0 && this.enableToolUse) {
+                // Chiamata a LiteLLM (formato OpenAI)
+                const response = await this.client.chat.completions.create({
+                    model: selectedModel,
+                    messages: messages,
+                    max_tokens: this.maxTokens,
+                    temperature: 0.7,
+                    tools: this.enableToolUse && tools.length > 0 ? tools : undefined
+                });
+
+                const choice = response.choices[0];
+                const content = choice.message.content || '';
+                const toolCalls = choice.message.tool_calls || [];
+
+                lastModel = response.model;
+                totalUsage.input_tokens += response.usage?.prompt_tokens || 0;
+                totalUsage.output_tokens += response.usage?.completion_tokens || 0;
+
+                // Track usage in context manager for accurate token counting
+                if (response.usage) {
+                    this.contextManager.trackUsage(response.usage);
+                }
+
+                console.log('📥 LiteLLM Response:', {
+                    model: response.model,
+                    finishReason: choice.finish_reason,
+                    toolCalls: toolCalls.length,
+                    hasContent: content.length > 0
+                });
+
+                // Aggiungi contenuto testuale alla risposta finale
+                if (content) {
+                    finalResponse += content;
+                }
+
+                // Se non ci sono tool calls, abbiamo finito
+                if (toolCalls.length === 0 || !this.enableToolUse) {
+                    break;
+                }
+
+                // Esegui i tool
                 const convertedToolUses = this.convertOpenAIToolCalls(toolCalls);
-                const toolResults = [];
+                allToolsUsed.push(...convertedToolUses.map(t => t.name));
 
+                const toolResults = [];
                 for (const toolUse of convertedToolUses) {
+                    console.log(`🔧 Executing tool: ${toolUse.name}`);
                     const result = await this.executeTool(toolUse.name, toolUse.input);
                     toolResults.push({
                         role: 'tool',
@@ -727,44 +766,24 @@ ${this.cachedProjectContextAddition}`;
                     });
                 }
 
-                // Follow-up con tool results
-                const followUpResponse = await this.client.chat.completions.create({
-                    model: selectedModel,
-                    messages: [
-                        ...messages,
-                        choice.message,
-                        ...toolResults
-                    ],
-                    max_tokens: this.maxTokens,
-                    temperature: 0.7,
-                    tools: tools.length > 0 ? tools : undefined
-                });
-
-                finalResponse += followUpResponse.choices[0].message.content || '';
-
-                return {
-                    message: finalResponse,
-                    thinking: null, // OpenAI doesn't support thinking mode
-                    toolsUsed: convertedToolUses.map(t => t.name),
-                    model: response.model,
-                    usage: {
-                        input_tokens: response.usage.prompt_tokens,
-                        output_tokens: response.usage.completion_tokens
-                    },
-                    provider: 'litellm'
-                };
+                // Aggiungi assistant message e tool results per il prossimo round
+                messages = [
+                    ...messages,
+                    choice.message,
+                    ...toolResults
+                ];
             }
 
-            // Nessun tool use
+            if (round >= MAX_TOOL_ROUNDS) {
+                console.warn('⚠️ Max tool rounds reached, stopping');
+            }
+
             return {
                 message: finalResponse,
-                thinking: null,
-                toolsUsed: [],
-                model: response.model,
-                usage: {
-                    input_tokens: response.usage.prompt_tokens,
-                    output_tokens: response.usage.completion_tokens
-                },
+                thinking: null, // OpenAI doesn't support thinking mode
+                toolsUsed: allToolsUsed,
+                model: lastModel,
+                usage: totalUsage,
                 provider: 'litellm'
             };
 
@@ -911,8 +930,13 @@ ${this.cachedProjectContextAddition}`;
 
     /**
      * Stream response per real-time typing effect
+     * Supporta sia Anthropic che LiteLLM
      */
     async streamMessage(userMessage, conversationHistory = []) {
+        if (this.provider === 'litellm') {
+            return this.streamMessageLiteLLM(userMessage, conversationHistory);
+        }
+
         const messages = [
             ...conversationHistory.map(msg => ({
                 role: msg.role,
@@ -936,23 +960,348 @@ ${this.cachedProjectContextAddition}`;
     }
 
     /**
+     * Stream message using LiteLLM (OpenAI-compatible streaming)
+     * Returns an async iterator that emits text chunks
+     */
+    async streamMessageLiteLLM(userMessage, conversationHistory = []) {
+        const messages = [
+            { role: 'system', content: this.getSystemPrompt() },
+            ...conversationHistory.map(msg => ({
+                role: msg.role,
+                content: msg.content
+            })),
+            { role: 'user', content: userMessage }
+        ];
+
+        const tools = this.convertToolsToOpenAI(this.getTools());
+
+        const stream = await this.client.chat.completions.create({
+            model: this.model,
+            messages: messages,
+            max_tokens: this.maxTokens,
+            temperature: 0.7,
+            tools: this.enableToolUse && tools.length > 0 ? tools : undefined,
+            stream: true
+        });
+
+        return stream;
+    }
+
+    /**
      * Stream con supporto per steering in real-time
      * Permette di interrompere e ri-indirizzare la risposta durante la generazione
-     *
-     * @param {string} userMessage - Il messaggio dell'utente
-     * @param {Array} conversationHistory - Storia della conversazione
-     * @param {Object} streamingManager - Manager per gestire lo steering
-     * @param {string} sessionId - ID della sessione
-     * @param {Function} onChunk - Callback per ogni chunk di testo
-     * @param {Function} onComplete - Callback al completamento
-     * @param {Function} onError - Callback per errori
+     * Supporta sia Anthropic che LiteLLM
+     * @param {Array} attachments - Array di {type: 'image'|'text', name, data/content, mimeType}
      */
-    async streamWithSteering(userMessage, conversationHistory, streamingManager, sessionId, onChunk, onComplete, onError) {
+    async streamWithSteering(userMessage, conversationHistory, streamingManager, sessionId, onChunk, onComplete, onError, attachments = []) {
+        if (this.provider === 'litellm') {
+            return this.streamWithSteeringLiteLLM(userMessage, conversationHistory, streamingManager, sessionId, onChunk, onComplete, onError, attachments);
+        }
+        return this.streamWithSteeringAnthropic(userMessage, conversationHistory, streamingManager, sessionId, onChunk, onComplete, onError, attachments);
+    }
+
+    /**
+     * Formatta messaggio con attachments per OpenAI/LiteLLM API
+     * @returns {string|Array} - Contenuto formattato
+     */
+    formatMessageWithAttachments(message, attachments) {
+        if (!attachments || attachments.length === 0) {
+            return message;
+        }
+
+        // Costruisci array di content parts
+        const contentParts = [];
+
+        // Aggiungi file di testo come contesto
+        const textFiles = attachments.filter(a => a.type === 'text');
+        if (textFiles.length > 0) {
+            let textContext = '';
+            for (const file of textFiles) {
+                textContext += `\n\n--- File: ${file.name} ---\n${file.content}\n--- Fine ${file.name} ---\n`;
+            }
+            contentParts.push({
+                type: 'text',
+                text: message + textContext
+            });
+        } else {
+            contentParts.push({
+                type: 'text',
+                text: message || 'Analizza le immagini allegate.'
+            });
+        }
+
+        // Aggiungi immagini
+        const imageFiles = attachments.filter(a => a.type === 'image');
+        for (const img of imageFiles) {
+            contentParts.push({
+                type: 'image_url',
+                image_url: {
+                    url: `data:${img.mimeType};base64,${img.data}`
+                }
+            });
+        }
+
+        return contentParts;
+    }
+
+    /**
+     * Formatta messaggio con attachments per Anthropic API
+     * @returns {string|Array} - Contenuto formattato
+     */
+    formatMessageWithAttachmentsAnthropic(message, attachments) {
+        if (!attachments || attachments.length === 0) {
+            return message;
+        }
+
+        // Costruisci array di content parts per Anthropic
+        const contentParts = [];
+
+        // Aggiungi file di testo come contesto
+        const textFiles = attachments.filter(a => a.type === 'text');
+        let textMessage = message || '';
+        if (textFiles.length > 0) {
+            for (const file of textFiles) {
+                textMessage += `\n\n--- File: ${file.name} ---\n${file.content}\n--- Fine ${file.name} ---\n`;
+            }
+        }
+
+        contentParts.push({
+            type: 'text',
+            text: textMessage || 'Analizza le immagini allegate.'
+        });
+
+        // Aggiungi immagini in formato Anthropic
+        const imageFiles = attachments.filter(a => a.type === 'image');
+        for (const img of imageFiles) {
+            contentParts.push({
+                type: 'image',
+                source: {
+                    type: 'base64',
+                    media_type: img.mimeType,
+                    data: img.data
+                }
+            });
+        }
+
+        return contentParts;
+    }
+
+    /**
+     * Stream con steering per LiteLLM (OpenAI-compatible)
+     */
+    async streamWithSteeringLiteLLM(userMessage, conversationHistory, streamingManager, sessionId, onChunk, onComplete, onError, attachments = []) {
+        try {
+            const session = streamingManager.getOrCreateSession(sessionId);
+            session.active = true;
+            session.accumulatedText = '';
+
+            // Formatta messaggio con attachments
+            const userContent = this.formatMessageWithAttachments(userMessage, attachments);
+
+            let messages = [
+                { role: 'system', content: this.getSystemPrompt() },
+                ...conversationHistory.map(msg => ({
+                    role: msg.role,
+                    content: msg.content
+                })),
+                { role: 'user', content: userContent }
+            ];
+
+            const tools = this.convertToolsToOpenAI(this.getTools());
+            const MAX_TOOL_ROUNDS = 50; // Alto limite, utente può sempre stoppare
+            let round = 0;
+            let allToolsUsed = [];
+
+            while (round < MAX_TOOL_ROUNDS) {
+                round++;
+                console.log(`🔄 LiteLLM Streaming Round ${round}`);
+
+                // Streaming request with usage tracking
+                const stream = await this.client.chat.completions.create({
+                    model: this.model,
+                    messages: messages,
+                    max_tokens: this.maxTokens,
+                    temperature: 0.7,
+                    tools: this.enableToolUse && tools.length > 0 ? tools : undefined,
+                    stream: true,
+                    stream_options: { include_usage: true }
+                });
+
+                let currentContent = '';
+                let toolCalls = [];
+                let steeringApplied = false;
+                let streamFinished = false;
+                let streamUsage = null;
+
+                // Process stream chunks
+                for await (const chunk of stream) {
+                    // Check if session was stopped
+                    if (!streamingManager.isStreaming(sessionId)) {
+                        console.log(`🛑 Streaming stopped for session ${sessionId}`);
+                        break;
+                    }
+
+                    const delta = chunk.choices?.[0]?.delta;
+                    const finishReason = chunk.choices?.[0]?.finish_reason;
+
+                    // Check if stream is finished
+                    if (finishReason) {
+                        streamFinished = true;
+                    }
+
+                    // Capture usage from final chunk (when stream_options.include_usage is true)
+                    if (chunk.usage) {
+                        streamUsage = chunk.usage;
+                        console.log(`📊 Stream usage received: ${streamUsage.prompt_tokens || 0} prompt, ${streamUsage.completion_tokens || 0} completion`);
+                        // Track usage in context manager
+                        this.contextManager.trackUsage(streamUsage);
+                    }
+
+                    if (!delta) continue;
+
+                    // Handle text content
+                    if (delta.content) {
+                        currentContent += delta.content;
+                        session.accumulatedText += delta.content;
+                        if (onChunk) onChunk(delta.content);
+
+                        // Only check for steering during text generation (not during tool calls)
+                        const pendingSteering = streamingManager.getSteeringQueue(sessionId);
+                        if (pendingSteering.length > 0 && toolCalls.length === 0) {
+                            console.log(`🎯 Steering detected!`);
+                            const steeringTexts = pendingSteering.map(s => s.text).join('\n\n');
+
+                            messages.push({ role: 'assistant', content: session.accumulatedText });
+                            messages.push({
+                                role: 'user',
+                                content: `[STEERING FEEDBACK]\n${steeringTexts}\n\nPer favore, incorpora questo feedback nella tua risposta.`
+                            });
+
+                            streamingManager.markSteeringProcessed(sessionId);
+                            if (onChunk) onChunk('\n\n_[✨ Applicando feedback...]_\n\n');
+                            steeringApplied = true;
+                            break;
+                        }
+                    }
+
+                    // Handle tool calls - accumulate arguments
+                    if (delta.tool_calls) {
+                        for (const tc of delta.tool_calls) {
+                            if (tc.index !== undefined) {
+                                if (!toolCalls[tc.index]) {
+                                    toolCalls[tc.index] = {
+                                        id: tc.id || '',
+                                        function: { name: '', arguments: '' }
+                                    };
+                                }
+                                if (tc.id) toolCalls[tc.index].id = tc.id;
+                                if (tc.function?.name) toolCalls[tc.index].function.name = tc.function.name;
+                                if (tc.function?.arguments) toolCalls[tc.index].function.arguments += tc.function.arguments;
+                            }
+                        }
+                    }
+                }
+
+                // If steering was applied, continue to next iteration (restart stream)
+                if (steeringApplied) {
+                    continue;
+                }
+
+                // If no tool calls, we're done
+                if (toolCalls.length === 0) {
+                    break;
+                }
+
+                // Validate and execute tools
+                const toolResults = [];
+                const validToolCalls = [];
+
+                for (const tc of toolCalls) {
+                    if (!tc.function.name) continue;
+
+                    // Validate JSON arguments before processing
+                    let input;
+                    try {
+                        input = JSON.parse(tc.function.arguments || '{}');
+                    } catch (jsonError) {
+                        console.error(`⚠️ Invalid JSON in tool arguments for ${tc.function.name}: ${tc.function.arguments}`);
+                        // Skip this tool call - arguments are incomplete
+                        continue;
+                    }
+
+                    console.log(`🔧 Executing tool: ${tc.function.name}`);
+                    allToolsUsed.push(tc.function.name);
+                    validToolCalls.push(tc);
+
+                    try {
+                        const result = await this.executeTool(tc.function.name, input);
+
+                        // Notify client about tool execution
+                        if (onChunk) {
+                            onChunk(`\n\n_[🔧 ${tc.function.name}]_\n`);
+                        }
+
+                        toolResults.push({
+                            role: 'tool',
+                            tool_call_id: tc.id,
+                            content: JSON.stringify(result)
+                        });
+                    } catch (error) {
+                        console.error(`Tool execution error: ${error.message}`);
+                        toolResults.push({
+                            role: 'tool',
+                            tool_call_id: tc.id,
+                            content: JSON.stringify({ error: error.message })
+                        });
+                    }
+                }
+
+                // Only add to messages if we have valid tool calls
+                if (validToolCalls.length > 0) {
+                    messages.push({
+                        role: 'assistant',
+                        content: currentContent || null,
+                        tool_calls: validToolCalls.map(tc => ({
+                            id: tc.id,
+                            type: 'function',
+                            function: tc.function
+                        }))
+                    });
+                    messages.push(...toolResults);
+                } else if (currentContent) {
+                    // If no valid tool calls but we have content, just add the content
+                    messages.push({
+                        role: 'assistant',
+                        content: currentContent
+                    });
+                }
+            }
+
+            session.active = false;
+            if (onComplete) onComplete(session.accumulatedText);
+            return session.accumulatedText;
+
+        } catch (error) {
+            console.error('❌ Error in LiteLLM streaming:', error);
+            if (onError) onError(error);
+            throw error;
+        } finally {
+            streamingManager.cleanupSession(sessionId);
+        }
+    }
+
+    /**
+     * Stream con steering per Anthropic Direct
+     */
+    async streamWithSteeringAnthropic(userMessage, conversationHistory, streamingManager, sessionId, onChunk, onComplete, onError, attachments = []) {
         try {
             // Registra la sessione
             const session = streamingManager.getOrCreateSession(sessionId);
             session.active = true;
             session.accumulatedText = '';
+
+            // Formatta messaggio con attachments per Anthropic
+            const userContent = this.formatMessageWithAttachmentsAnthropic(userMessage, attachments);
 
             const messages = [
                 ...conversationHistory.map(msg => ({
@@ -961,7 +1310,7 @@ ${this.cachedProjectContextAddition}`;
                 })),
                 {
                     role: 'user',
-                    content: userMessage
+                    content: userContent
                 }
             ];
 

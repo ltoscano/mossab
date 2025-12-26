@@ -1,9 +1,22 @@
 {
-  "instructions": "",
-  "preferences": {},
-  "standards": {},
+  "instructions": "This is a React 18 project using TypeScript and modern hooks.",
+  "preferences": {
+    "framework": "React 18",
+    "language": "TypeScript",
+    "componentStyle": "Functional components with hooks",
+    "stateManagement": "React Context + useReducer",
+    "testFramework": "Jest + React Testing Library",
+    "styling": "CSS Modules"
+  },
+  "standards": {
+    "naming": "PascalCase for components, camelCase for functions",
+    "fileStructure": "Feature-based folder structure",
+    "testing": "Write unit tests for all components",
+    "comments": "JSDoc comments for public APIs"
+  },
   "metadata": {
-    "created": "2025-12-25T05:20:37.229Z",
-    "updated": "2025-12-25T05:20:37.272Z"
+    "created": "2025-12-25T22:10:49.124Z",
+    "updated": "2025-12-25T22:10:49.124Z",
+    "template": "react"
   }
 }

@@ -1,4 +1,7 @@
 node_modules/
+examples/
+*.pyc
+__pycache__/
 .env
 .DS_Store
 *.log

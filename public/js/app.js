@@ -6,12 +6,18 @@ class MossabChat {
         this.isStreaming = false;
         this.sessionId = 'session_' + Date.now();
 
+        // Attachments
+        this.attachments = [];
+        this.maxFileSize = 10 * 1024 * 1024; // 10MB
+        this.allowedTextExtensions = ['.txt', '.md', '.js', '.ts', '.py', '.java', '.c', '.cpp', '.h', '.css', '.html', '.json', '.xml', '.yaml', '.yml', '.sh', '.bash', '.sql', '.go', '.rs', '.rb', '.php', '.swift', '.kt'];
+        this.allowedImageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
+
         // DOM Elements
         this.messagesContainer = document.getElementById('messagesContainer');
         this.messageInput = document.getElementById('messageInput');
         this.sendBtn = document.getElementById('sendBtn');
         this.newChatBtn = document.getElementById('newChatBtn');
-        this.tokenCounter = document.getElementById('tokenCounter');
+        this.attachBtn = document.querySelector('.attach-btn');
 
         // Steering elements
         this.steeringControl = document.getElementById('steeringControl');
@@ -24,6 +30,10 @@ class MossabChat {
         this.todoIndicator = document.getElementById('todoIndicator');
         this.todoProgress = document.getElementById('todoProgress');
         this.todoCurrentTask = document.getElementById('todoCurrentTask');
+        this.todoHeader = document.getElementById('todoHeader');
+        this.todoList = document.getElementById('todoList');
+        this.todoExpanded = false;
+        this.currentTodos = [];
 
         // Skills modal elements
         this.skillsBtn = document.getElementById('skillsBtn');
@@ -53,6 +63,7 @@ class MossabChat {
         this.contextText = document.getElementById('contextText');
         this.contextSummarizeBtn = document.getElementById('contextSummarizeBtn');
         this.contextUpdateInterval = null;
+        this.autoSummarizationTriggered = false;
 
         // Project Context modal elements
         this.projectBtn = document.getElementById('projectBtn');
@@ -98,7 +109,6 @@ class MossabChat {
 
         this.messageInput.addEventListener('input', () => {
             this.autoResize();
-            this.updateTokenCounter();
         });
 
         this.newChatBtn.addEventListener('click', () => this.newChat());
@@ -159,8 +169,27 @@ class MossabChat {
             });
         });
 
+        // Attachment event listeners
+        this.initAttachments();
+
         // Initial focus
         this.messageInput.focus();
+
+        // TODO toggle event
+        if (this.todoHeader) {
+            this.todoHeader.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggleTodoList();
+            });
+        }
+
+        // Close todo list when clicking outside
+        document.addEventListener('click', (e) => {
+            if (this.todoExpanded && !this.todoIndicator.contains(e.target)) {
+                this.todoExpanded = false;
+                this.todoList.classList.add('hidden');
+            }
+        });
 
         // Start TODO polling
         this.startTodoPolling();
@@ -199,8 +228,12 @@ class MossabChat {
     updateTodoUI(data) {
         if (!data.todos || data.todos.length === 0) {
             this.todoIndicator.classList.add('hidden');
+            this.todoExpanded = false;
             return;
         }
+
+        // Store current todos
+        this.currentTodos = data.todos;
 
         // Show indicator
         this.todoIndicator.classList.remove('hidden');
@@ -211,10 +244,58 @@ class MossabChat {
         // Update current task
         if (data.summary.current_task) {
             this.todoCurrentTask.textContent = data.summary.current_task;
-            this.todoCurrentTask.style.display = 'block';
+            this.todoCurrentTask.style.display = 'inline';
         } else {
             this.todoCurrentTask.style.display = 'none';
         }
+
+        // Update todo list if expanded
+        if (this.todoExpanded) {
+            this.renderTodoList();
+        }
+    }
+
+    toggleTodoList() {
+        this.todoExpanded = !this.todoExpanded;
+
+        if (this.todoExpanded) {
+            this.todoList.classList.remove('hidden');
+            this.renderTodoList();
+        } else {
+            this.todoList.classList.add('hidden');
+        }
+    }
+
+    renderTodoList() {
+        if (!this.todoList || !this.currentTodos.length) return;
+
+        this.todoList.innerHTML = this.currentTodos.map(todo => {
+            let statusIcon, statusClass;
+
+            switch (todo.status) {
+                case 'completed':
+                    statusIcon = '✓';
+                    statusClass = 'todo-completed';
+                    break;
+                case 'in_progress':
+                    statusIcon = '+';
+                    statusClass = 'todo-in-progress';
+                    break;
+                default:
+                    statusIcon = '○';
+                    statusClass = 'todo-pending';
+            }
+
+            const isActive = todo.status === 'in_progress';
+            const displayText = isActive ? todo.activeForm : todo.content;
+
+            return `
+                <div class="todo-item ${statusClass}">
+                    <span class="todo-status-icon">${statusIcon}</span>
+                    <span class="todo-text">${displayText}</span>
+                </div>
+            `;
+        }).join('');
     }
 
     autoResize() {
@@ -222,16 +303,11 @@ class MossabChat {
         this.messageInput.style.height = this.messageInput.scrollHeight + 'px';
     }
 
-    updateTokenCounter() {
-        const text = this.messageInput.value;
-        const tokens = Math.ceil(text.length / 4); // Rough estimate
-        this.tokenCounter.querySelector('span').textContent = `~${tokens} tokens`;
-    }
 
     async sendMessage() {
         const message = this.messageInput.value.trim();
 
-        if (!message || this.isTyping) return;
+        if ((!message && this.attachments.length === 0) || this.isTyping) return;
 
         // Hide welcome screen if visible
         const welcomeScreen = document.querySelector('.welcome-screen');
@@ -242,18 +318,28 @@ class MossabChat {
             }, 300);
         }
 
+        // Prepara display message con attachments
+        let displayMessage = message;
+        if (this.attachments.length > 0) {
+            const attachInfo = this.attachments.map(a =>
+                a.type === 'image' ? `📷 ${a.name}` : `📎 ${a.name}`
+            ).join(', ');
+            displayMessage = message ? `${message}\n\n_Allegati: ${attachInfo}_` : `_Allegati: ${attachInfo}_`;
+        }
+
         // Add user message to UI
-        this.addMessage('user', message);
+        this.addMessage('user', displayMessage);
 
-        // Clear input
+        // Clear input and attachments
         this.messageInput.value = '';
+        const currentAttachments = [...this.attachments];
+        this.clearAttachments();
         this.autoResize();
-        this.updateTokenCounter();
 
-        // Add to conversation history
+        // Add to conversation history (testo semplice per history)
         this.conversationHistory.push({
             role: 'user',
-            content: message
+            content: message || 'Vedi allegati'
         });
 
         // Show typing indicator
@@ -263,7 +349,7 @@ class MossabChat {
         this.showSteeringControls();
 
         try {
-            // Call API
+            // Call API con attachments
             const response = await fetch('/api/chat', {
                 method: 'POST',
                 headers: {
@@ -271,6 +357,7 @@ class MossabChat {
                 },
                 body: JSON.stringify({
                     message: message,
+                    attachments: currentAttachments,
                     conversationHistory: this.conversationHistory,
                     sessionId: this.sessionId
                 })
@@ -396,7 +483,7 @@ class MossabChat {
         }, 100);
     }
 
-    newChat() {
+    async newChat() {
         // Confirm if there's an active conversation
         if (this.conversationHistory.length > 0) {
             const confirm = window.confirm('Vuoi iniziare una nuova conversazione? La chat corrente andrà persa.');
@@ -419,11 +506,21 @@ class MossabChat {
         // Reset input
         this.messageInput.value = '';
         this.autoResize();
-        this.updateTokenCounter();
         this.messageInput.focus();
 
         // Reset session
         this.sessionId = 'session_' + Date.now();
+
+        // Reset token tracking on server
+        try {
+            await fetch('/api/context/reset', { method: 'POST' });
+            console.log('📊 Token tracking reset');
+        } catch (error) {
+            console.error('Error resetting token tracking:', error);
+        }
+
+        // Update context usage display
+        this.updateContextUsage();
     }
 
     /**
@@ -488,12 +585,12 @@ class MossabChat {
 
             } else {
                 console.error('❌ Steering failed:', data.error);
-                alert('Impossibile inviare il feedback: ' + data.error);
+                this.showAlert('Impossibile inviare il feedback: ' + data.error, 'error');
             }
 
         } catch (error) {
             console.error('Error sending steering:', error);
-            alert('Errore nell\'invio del feedback');
+            this.showAlert('Errore nell\'invio del feedback', 'error');
         }
     }
 
@@ -621,7 +718,7 @@ class MossabChat {
 
         } catch (error) {
             console.error('Error reloading skills:', error);
-            alert('Errore nel reload delle skills');
+            this.showAlert('Errore nel reload delle skills', 'error');
         } finally {
             this.skillsReloadBtn.disabled = false;
             this.skillsReloadBtn.innerHTML = `
@@ -789,7 +886,7 @@ class MossabChat {
         const enabled = document.getElementById('mcpServerEnabled').checked;
 
         if (!name || !url) {
-            alert('Nome e URL sono obbligatori');
+            this.showAlert('Nome e URL sono obbligatori', 'warning');
             return;
         }
 
@@ -819,12 +916,12 @@ class MossabChat {
                 await this.loadMCPStatus();
                 await this.loadMCPServers();
             } else {
-                alert(`Errore: ${data.error || data.message || 'Operazione fallita'}`);
+                this.showAlert(`Errore: ${data.error || data.message || 'Operazione fallita'}`, 'error');
             }
 
         } catch (error) {
             console.error('Error adding MCP server:', error);
-            alert('Errore nell\'aggiunta del server');
+            this.showAlert('Errore nell\'aggiunta del server', 'error');
         } finally {
             this.mcpSubmitAddBtn.disabled = false;
             this.mcpSubmitAddBtn.textContent = 'Aggiungi Server';
@@ -853,12 +950,12 @@ class MossabChat {
                 await this.loadMCPStatus();
                 await this.loadMCPServers();
             } else {
-                alert(`Errore: ${data.error || data.message}`);
+                this.showAlert(`Errore: ${data.error || data.message}`, 'error');
             }
 
         } catch (error) {
             console.error('Error toggling MCP server:', error);
-            alert('Errore nell\'aggiornamento del server');
+            this.showAlert('Errore nell\'aggiornamento del server', 'error');
         }
     }
 
@@ -882,12 +979,12 @@ class MossabChat {
                 await this.loadMCPStatus();
                 await this.loadMCPServers();
             } else {
-                alert(`Errore: ${data.error || data.message}`);
+                this.showAlert(`Errore: ${data.error || data.message}`, 'error');
             }
 
         } catch (error) {
             console.error('Error deleting MCP server:', error);
-            alert('Errore nell\'eliminazione del server');
+            this.showAlert('Errore nell\'eliminazione del server', 'error');
         }
     }
 
@@ -916,7 +1013,7 @@ class MossabChat {
 
         } catch (error) {
             console.error('Error reloading MCP:', error);
-            alert('Errore nel reload della configurazione MCP');
+            this.showAlert('Errore nel reload della configurazione MCP', 'error');
         } finally {
             this.mcpReloadBtn.disabled = false;
             this.mcpReloadBtn.innerHTML = `
@@ -969,13 +1066,27 @@ class MossabChat {
             if (stats.status === 'critical') {
                 this.contextUsage.classList.add('critical');
                 this.contextFill.classList.add('critical');
-                this.contextSummarizeBtn.classList.remove('hidden');
             } else if (stats.status === 'warning') {
                 this.contextUsage.classList.add('warning');
                 this.contextFill.classList.add('warning');
+            }
+
+            // Gestione bottone e auto-summarization
+            if (stats.showManualButton) {
+                // 85-95%: mostra bottone per summarization manuale
                 this.contextSummarizeBtn.classList.remove('hidden');
-            } else {
+            } else if (stats.shouldAutoSummarize) {
+                // >95%: trigger auto summarization
                 this.contextSummarizeBtn.classList.add('hidden');
+                if (!this.autoSummarizationTriggered) {
+                    this.autoSummarizationTriggered = true;
+                    console.log('⚠️ Context critical (>95%), triggering auto summarization...');
+                    this.triggerAutoSummarization();
+                }
+            } else {
+                // <85%: nascondi bottone
+                this.contextSummarizeBtn.classList.add('hidden');
+                this.autoSummarizationTriggered = false;
             }
 
         } catch (error) {
@@ -1006,27 +1117,34 @@ class MossabChat {
             const data = await response.json();
 
             if (data.success) {
-                // Mostra stats del risparmio
+                // Mostra stats del risparmio (se disponibili)
                 const { stats } = data;
-                console.log(`✅ Conversation summarized successfully!`);
-                console.log(`   Messages: ${stats.originalMessages} → ${stats.optimizedMessages}`);
-                console.log(`   Tokens: ${stats.originalTokens.toLocaleString()} → ${stats.optimizedTokens.toLocaleString()}`);
-                console.log(`   Saved: ${stats.savedTokens.toLocaleString()} tokens (${stats.savedPercentage}%)`);
 
-                // Aggiungi messaggio di sistema nella chat
-                this.addSystemMessage(
-                    `🧠 Context Summarized: ${stats.savedPercentage}% saved (${stats.originalMessages} → ${stats.optimizedMessages} messages)`
-                );
+                if (stats) {
+                    console.log(`✅ Conversation summarized successfully!`);
+                    console.log(`   Messages: ${stats.originalMessages} → ${stats.optimizedMessages}`);
+                    console.log(`   Tokens: ${stats.originalTokens.toLocaleString()} → ${stats.optimizedTokens.toLocaleString()}`);
+                    console.log(`   Saved: ${stats.savedTokens.toLocaleString()} tokens (${stats.savedPercentage}%)`);
+
+                    // Aggiungi messaggio di sistema nella chat
+                    this.addSystemMessage(
+                        `🧠 Context Summarized: ${stats.savedPercentage}% saved (${stats.originalMessages} → ${stats.optimizedMessages} messages)`
+                    );
+                } else {
+                    // Nessun messaggio da summarizzare
+                    console.log(`ℹ️ ${data.message || 'No messages to summarize'}`);
+                    this.addSystemMessage(`ℹ️ ${data.message || 'Nessun messaggio da riassumere'}`);
+                }
 
                 // Update context usage
                 await this.updateContextUsage();
             } else {
-                alert(`Errore: ${data.error || data.message}`);
+                this.showAlert(`Errore: ${data.error || data.message}`, 'error');
             }
 
         } catch (error) {
             console.error('Error in manual summarization:', error);
-            alert('Errore durante la summarization');
+            this.showAlert('Errore durante la summarization', 'error');
         } finally {
             this.contextSummarizeBtn.disabled = false;
             this.contextSummarizeBtn.innerHTML = `
@@ -1034,6 +1152,56 @@ class MossabChat {
                     <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"></path>
                 </svg>
             `;
+        }
+    }
+
+    /**
+     * Trigger automatic summarization (no confirmation)
+     * Called when context exceeds 95%
+     */
+    async triggerAutoSummarization() {
+        console.log('🧠 Auto-summarization triggered (context > 95%)');
+
+        // Mostra notifica all'utente
+        this.addSystemMessage('⚠️ Context quasi pieno (>95%), avvio summarization automatica...');
+
+        try {
+            const response = await fetch(`/api/context/summarize/${this.sessionId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = await response.json();
+
+            if (data.success && data.stats) {
+                const { stats } = data;
+                console.log(`✅ Auto-summarization complete!`);
+                console.log(`   Messages: ${stats.originalMessages} → ${stats.optimizedMessages}`);
+                console.log(`   Saved: ${stats.savedTokens.toLocaleString()} tokens (${stats.savedPercentage}%)`);
+
+                this.addSystemMessage(
+                    `✅ Auto-summarization completata: ${stats.savedPercentage}% risparmiato (${stats.originalMessages} → ${stats.optimizedMessages} messaggi)`
+                );
+
+                // Update context usage
+                await this.updateContextUsage();
+            } else if (data.success) {
+                console.log('ℹ️ No messages to auto-summarize');
+            } else {
+                console.error('Auto-summarization failed:', data.error);
+                this.addSystemMessage(`⚠️ Auto-summarization fallita: ${data.error || data.message}`);
+            }
+
+        } catch (error) {
+            console.error('Error in auto-summarization:', error);
+            this.addSystemMessage('⚠️ Errore durante auto-summarization');
+        } finally {
+            // Reset flag dopo un delay per evitare trigger multipli
+            setTimeout(() => {
+                this.autoSummarizationTriggered = false;
+            }, 30000); // 30 secondi prima di poter ri-triggerare
         }
     }
 
@@ -1098,7 +1266,7 @@ class MossabChat {
             }
         } catch (error) {
             console.error('Error applying template:', error);
-            alert('Errore nell\'applicazione del template');
+            this.showAlert('Errore nell\'applicazione del template', 'error');
         }
     }
 
@@ -1135,7 +1303,7 @@ class MossabChat {
             }
         } catch (error) {
             console.error('Error saving project context:', error);
-            alert('Errore nel salvataggio');
+            this.showAlert('Errore nel salvataggio', 'error');
         } finally {
             this.projectSaveBtn.disabled = false;
             this.projectSaveBtn.textContent = 'Save';
@@ -1157,7 +1325,7 @@ class MossabChat {
             }
         } catch (error) {
             console.error('Error resetting project context:', error);
-            alert('Errore nel reset');
+            this.showAlert('Errore nel reset', 'error');
         }
     }
 
@@ -1252,7 +1420,7 @@ class MossabChat {
         const answer = this.questionAnswerInput.value.trim();
 
         if (!answer) {
-            alert('Per favore scrivi una risposta');
+            this.showAlert('Per favore scrivi una risposta', 'warning');
             return;
         }
 
@@ -1274,12 +1442,12 @@ class MossabChat {
                 console.log('✅ Answer submitted');
                 this.closeQuestionModal();
             } else {
-                alert(`Errore: ${data.error}`);
+                this.showAlert(`Errore: ${data.error}`, 'error');
             }
 
         } catch (error) {
             console.error('Error submitting answer:', error);
-            alert('Errore nell\'invio della risposta');
+            this.showAlert('Errore nell\'invio della risposta', 'error');
         } finally {
             this.questionSubmitBtn.disabled = false;
             this.questionSubmitBtn.textContent = 'Rispondi';
@@ -1311,7 +1479,7 @@ class MossabChat {
 
         } catch (error) {
             console.error('Error cancelling question:', error);
-            alert('Errore nella cancellazione');
+            this.showAlert('Errore nella cancellazione', 'error');
         }
     }
 
@@ -1322,6 +1490,383 @@ class MossabChat {
         this.questionModal.classList.add('hidden');
         this.currentQuestionId = null;
         this.questionAnswerInput.value = '';
+    }
+
+    // ==========================================
+    // ATTACHMENT FUNCTIONALITY
+    // ==========================================
+
+    /**
+     * Inizializza la funzionalità di attachment
+     */
+    initAttachments() {
+        // Crea input file nascosto
+        this.fileInput = document.createElement('input');
+        this.fileInput.type = 'file';
+        this.fileInput.multiple = true;
+        this.fileInput.accept = [...this.allowedTextExtensions, ...this.allowedImageExtensions].join(',');
+        this.fileInput.style.display = 'none';
+        document.body.appendChild(this.fileInput);
+
+        // Crea container per preview attachments
+        this.attachmentPreview = document.createElement('div');
+        this.attachmentPreview.className = 'attachment-preview hidden';
+        this.attachmentPreview.id = 'attachmentPreview';
+
+        // Inserisci prima dell'input wrapper
+        const inputWrapper = document.querySelector('.input-wrapper');
+        inputWrapper.parentNode.insertBefore(this.attachmentPreview, inputWrapper);
+
+        // Event: click sul bottone attach
+        if (this.attachBtn) {
+            this.attachBtn.addEventListener('click', () => this.fileInput.click());
+        }
+
+        // Event: file selezionati
+        this.fileInput.addEventListener('change', (e) => this.handleFileSelect(e.target.files));
+
+        // Event: drag & drop sull'input area
+        const inputArea = document.querySelector('.input-area');
+        if (inputArea) {
+            inputArea.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                inputArea.classList.add('drag-over');
+            });
+
+            inputArea.addEventListener('dragleave', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                inputArea.classList.remove('drag-over');
+            });
+
+            inputArea.addEventListener('drop', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                inputArea.classList.remove('drag-over');
+                this.handleFileSelect(e.dataTransfer.files);
+            });
+        }
+
+        // Event: paste immagini
+        document.addEventListener('paste', (e) => {
+            const items = e.clipboardData?.items;
+            if (!items) return;
+
+            const files = [];
+            for (const item of items) {
+                if (item.type.startsWith('image/')) {
+                    const file = item.getAsFile();
+                    if (file) files.push(file);
+                }
+            }
+            if (files.length > 0) {
+                this.handleFileSelect(files);
+            }
+        });
+    }
+
+    /**
+     * Gestisci selezione file
+     */
+    async handleFileSelect(files) {
+        for (const file of files) {
+            // Verifica dimensione
+            if (file.size > this.maxFileSize) {
+                this.showNotification(`File "${file.name}" troppo grande (max 10MB)`, 'error');
+                continue;
+            }
+
+            // Determina tipo file
+            const ext = '.' + file.name.split('.').pop().toLowerCase();
+            const isImage = this.allowedImageExtensions.includes(ext) || file.type.startsWith('image/');
+            const isText = this.allowedTextExtensions.includes(ext);
+
+            if (!isImage && !isText) {
+                this.showNotification(`Tipo file non supportato: ${ext}`, 'error');
+                continue;
+            }
+
+            try {
+                if (isImage) {
+                    // Leggi immagine come base64
+                    const base64 = await this.readFileAsBase64(file);
+                    this.attachments.push({
+                        type: 'image',
+                        name: file.name,
+                        mimeType: file.type || 'image/png',
+                        data: base64,
+                        size: file.size
+                    });
+                } else {
+                    // Leggi file di testo
+                    const content = await this.readFileAsText(file);
+                    this.attachments.push({
+                        type: 'text',
+                        name: file.name,
+                        content: content,
+                        size: file.size
+                    });
+                }
+            } catch (error) {
+                console.error('Error reading file:', error);
+                this.showNotification(`Errore lettura file: ${file.name}`, 'error');
+            }
+        }
+
+        this.updateAttachmentPreview();
+        this.fileInput.value = ''; // Reset per permettere ri-selezione stesso file
+    }
+
+    /**
+     * Leggi file come base64
+     */
+    readFileAsBase64(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+                // Rimuovi il prefisso "data:...;base64,"
+                const base64 = reader.result.split(',')[1];
+                resolve(base64);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+        });
+    }
+
+    /**
+     * Leggi file come testo
+     */
+    readFileAsText(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsText(file);
+        });
+    }
+
+    /**
+     * Aggiorna preview degli attachment
+     */
+    updateAttachmentPreview() {
+        if (this.attachments.length === 0) {
+            this.attachmentPreview.classList.add('hidden');
+            this.attachmentPreview.innerHTML = '';
+            return;
+        }
+
+        this.attachmentPreview.classList.remove('hidden');
+        this.attachmentPreview.innerHTML = this.attachments.map((att, index) => {
+            if (att.type === 'image') {
+                return `
+                    <div class="attachment-item attachment-image" data-index="${index}">
+                        <img src="data:${att.mimeType};base64,${att.data}" alt="${att.name}">
+                        <span class="attachment-name">${att.name}</span>
+                        <button class="attachment-remove" onclick="app.removeAttachment(${index})">×</button>
+                    </div>
+                `;
+            } else {
+                const icon = this.getFileIcon(att.name);
+                return `
+                    <div class="attachment-item attachment-text" data-index="${index}">
+                        <span class="attachment-icon">${icon}</span>
+                        <span class="attachment-name">${att.name}</span>
+                        <span class="attachment-size">${this.formatFileSize(att.size)}</span>
+                        <button class="attachment-remove" onclick="app.removeAttachment(${index})">×</button>
+                    </div>
+                `;
+            }
+        }).join('');
+    }
+
+    /**
+     * Rimuovi attachment
+     */
+    removeAttachment(index) {
+        this.attachments.splice(index, 1);
+        this.updateAttachmentPreview();
+    }
+
+    /**
+     * Pulisci tutti gli attachment
+     */
+    clearAttachments() {
+        this.attachments = [];
+        this.updateAttachmentPreview();
+    }
+
+    /**
+     * Ottieni icona per tipo file
+     */
+    getFileIcon(filename) {
+        const ext = filename.split('.').pop().toLowerCase();
+        const icons = {
+            'js': '📜', 'ts': '📘', 'py': '🐍', 'java': '☕',
+            'c': '⚙️', 'cpp': '⚙️', 'h': '⚙️', 'go': '🔵',
+            'rs': '🦀', 'rb': '💎', 'php': '🐘', 'swift': '🍎',
+            'kt': '🟣', 'json': '📋', 'xml': '📄', 'yaml': '📝',
+            'yml': '📝', 'md': '📖', 'txt': '📝', 'html': '🌐',
+            'css': '🎨', 'sql': '🗃️', 'sh': '💻', 'bash': '💻'
+        };
+        return icons[ext] || '📄';
+    }
+
+    /**
+     * Formatta dimensione file
+     */
+    formatFileSize(bytes) {
+        if (bytes < 1024) return bytes + ' B';
+        if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+        return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    }
+
+    /**
+     * Mostra notifica toast (temporanea)
+     */
+    showNotification(message, type = 'info') {
+        const notification = document.createElement('div');
+        notification.className = `notification notification-${type}`;
+        notification.textContent = message;
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 12px 24px;
+            border-radius: 8px;
+            background: ${type === 'error' ? '#ff5252' : '#7c4dff'};
+            color: white;
+            font-weight: 500;
+            z-index: 10000;
+            animation: slideIn 0.3s ease;
+        `;
+        document.body.appendChild(notification);
+
+        setTimeout(() => {
+            notification.style.animation = 'fadeOut 0.3s ease';
+            setTimeout(() => notification.remove(), 300);
+        }, 3000);
+    }
+
+    /**
+     * Mostra alert modale personalizzato (sostituisce alert())
+     * @param {string} message - Messaggio da mostrare
+     * @param {string} type - Tipo: 'info', 'warning', 'error', 'success'
+     * @param {string} title - Titolo opzionale
+     * @returns {Promise} - Si risolve quando l'utente chiude il modale
+     */
+    showAlert(message, type = 'info', title = null) {
+        return new Promise((resolve) => {
+            // Icone per tipo
+            const icons = {
+                info: 'ℹ️',
+                warning: '⚠️',
+                error: '❌',
+                success: '✅'
+            };
+
+            // Colori per tipo
+            const colors = {
+                info: '#7c4dff',
+                warning: '#ff9800',
+                error: '#ff5252',
+                success: '#00e676'
+            };
+
+            // Titoli default per tipo
+            const defaultTitles = {
+                info: 'Informazione',
+                warning: 'Attenzione',
+                error: 'Errore',
+                success: 'Completato'
+            };
+
+            const icon = icons[type] || icons.info;
+            const color = colors[type] || colors.info;
+            const modalTitle = title || defaultTitles[type] || 'Messaggio';
+
+            // Crea overlay
+            const overlay = document.createElement('div');
+            overlay.className = 'custom-alert-overlay';
+            overlay.style.cssText = `
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0, 0, 0, 0.7);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 10001;
+                animation: fadeIn 0.2s ease;
+            `;
+
+            // Crea modal
+            const modal = document.createElement('div');
+            modal.className = 'custom-alert-modal';
+            modal.style.cssText = `
+                background: #1e1e2e;
+                border-radius: 12px;
+                padding: 24px;
+                max-width: 400px;
+                width: 90%;
+                box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                animation: slideUp 0.3s ease;
+            `;
+
+            modal.innerHTML = `
+                <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 16px;">
+                    <span style="font-size: 24px;">${icon}</span>
+                    <h3 style="margin: 0; color: ${color}; font-size: 18px;">${modalTitle}</h3>
+                </div>
+                <div style="color: #e0e0e0; line-height: 1.6; margin-bottom: 20px; white-space: pre-wrap;">${message}</div>
+                <div style="display: flex; justify-content: flex-end;">
+                    <button class="custom-alert-ok-btn" style="
+                        background: ${color};
+                        color: white;
+                        border: none;
+                        padding: 10px 24px;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        font-weight: 500;
+                        font-size: 14px;
+                        transition: opacity 0.2s;
+                    ">OK</button>
+                </div>
+            `;
+
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+
+            // Event handlers
+            const closeModal = () => {
+                overlay.style.animation = 'fadeOut 0.2s ease';
+                modal.style.animation = 'slideDown 0.2s ease';
+                setTimeout(() => {
+                    overlay.remove();
+                    resolve();
+                }, 200);
+            };
+
+            modal.querySelector('.custom-alert-ok-btn').addEventListener('click', closeModal);
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) closeModal();
+            });
+
+            // ESC key
+            const escHandler = (e) => {
+                if (e.key === 'Escape') {
+                    document.removeEventListener('keydown', escHandler);
+                    closeModal();
+                }
+            };
+            document.addEventListener('keydown', escHandler);
+
+            // Focus sul bottone
+            modal.querySelector('.custom-alert-ok-btn').focus();
+        });
     }
 }
 

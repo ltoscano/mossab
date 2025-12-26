@@ -18,7 +18,8 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' })); // Aumentato per supportare immagini base64
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static(path.join(__dirname, '../public')));
 
 // Workspace root per filesystem operations
@@ -39,6 +40,24 @@ try {
 // Inizializza Streaming Manager per steering support
 const streamingManager = new StreamingManager();
 console.log('✅ Streaming Manager initialized - steering support enabled');
+
+// Helper: verifica se l'API è configurata (Anthropic o LiteLLM)
+function isApiConfigured() {
+    if (!claudeService) return false;
+
+    // Se provider è LiteLLM, non serve ANTHROPIC_API_KEY
+    if (process.env.AI_PROVIDER === 'litellm') {
+        return true;
+    }
+
+    // Per Anthropic, verifica che la key sia valida (non un placeholder)
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (apiKey && !apiKey.includes('your_') && apiKey.length > 20) {
+        return true;
+    }
+
+    return false;
+}
 
 // Inizializza Agent Manager per agent orchestration
 let agentManager;
@@ -196,24 +215,28 @@ function getFallbackResponse(message) {
 
     // Default response
     return `Ho ricevuto il tuo messaggio: "${message}"\n\n` +
-        "⚠️ **Modalità Limitata**: Sto funzionando senza l'API di Claude configurata.\n\n" +
-        "Per attivare le mie capacità complete (reasoning, tool use, planning):\n" +
-        "1. Configura `ANTHROPIC_API_KEY` nel file `.env`\n" +
-        "2. Riavvia il server\n\n" +
-        "Con l'API configurata potrò aiutarti molto meglio con codice, architettura, debugging e molto altro! 🚀";
+        "⚠️ **Modalità Limitata**: API non configurata correttamente.\n\n" +
+        "Per attivare le mie capacità complete:\n\n" +
+        "**Opzione 1 - Anthropic Direct:**\n" +
+        "```\nANTHROPIC_API_KEY=sk-ant-...\n```\n\n" +
+        "**Opzione 2 - LiteLLM Proxy:**\n" +
+        "```\nAI_PROVIDER=litellm\nLITELLM_PROXY_URL=http://localhost:4000\n```\n\n" +
+        "Dopo la configurazione, riavvia il server! 🚀";
 }
 
 /**
  * API Endpoint principale per la chat
- * Usa Claude Service con tutte le capacità avanzate
+ * Usa Claude Service con streaming e steering support
  */
 app.post('/api/chat', async (req, res) => {
     try {
-        const { message, conversationHistory = [], sessionId = 'default' } = req.body;
+        const { message, conversationHistory = [], sessionId = 'default', attachments = [] } = req.body;
 
-        if (!message || typeof message !== 'string' || message.trim() === '') {
+        // Allow empty message if there are attachments
+        const hasAttachments = attachments && attachments.length > 0;
+        if ((!message || typeof message !== 'string' || message.trim() === '') && !hasAttachments) {
             return res.status(400).json({
-                error: 'Message is required and must be a non-empty string'
+                error: 'Message or attachments required'
             });
         }
 
@@ -229,54 +252,73 @@ app.post('/api/chat', async (req, res) => {
         const session = sessions.get(sessionId);
         session.lastActive = new Date();
 
-        let response;
-
-        // Usa Claude Service se disponibile
-        if (claudeService && process.env.ANTHROPIC_API_KEY) {
+        // Check if Claude Service is available (works with both Anthropic and LiteLLM)
+        if (isApiConfigured()) {
             try {
                 // Imposta il sessionId corrente per ask_user_question tool
                 claudeService.currentSessionId = sessionId;
 
-                response = await claudeService.sendMessage(
-                    message,
-                    conversationHistory.length > 0 ? conversationHistory : session.history,
-                    sessionId
+                const history = conversationHistory.length > 0 ? conversationHistory : session.history;
+                let accumulatedText = '';
+                let toolsUsed = [];
+
+                // Usa streamWithSteering per supportare steering e tool use
+                await claudeService.streamWithSteering(
+                    message || '',
+                    history,
+                    streamingManager,
+                    sessionId,
+                    // onChunk - accumula testo
+                    (chunk) => {
+                        accumulatedText += chunk;
+                    },
+                    // onComplete
+                    (finalText) => {
+                        accumulatedText = finalText;
+                    },
+                    // onError
+                    (error) => {
+                        console.error('Streaming error:', error);
+                    },
+                    // attachments (nuovo parametro)
+                    attachments
                 );
 
                 // Salva nella session history
                 session.history.push(
                     { role: 'user', content: message },
-                    { role: 'assistant', content: response.message }
+                    { role: 'assistant', content: accumulatedText }
                 );
 
-                // Limita la history a 50 messaggi per sessione
+                // Limita la history a 100 messaggi per sessione
                 if (session.history.length > 100) {
                     session.history = session.history.slice(-100);
                 }
 
                 res.json({
-                    message: response.message,
-                    thinking: response.thinking,
-                    toolsUsed: response.toolsUsed,
-                    model: response.model,
-                    usage: response.usage,
+                    message: accumulatedText,
+                    thinking: null,
+                    toolsUsed: toolsUsed,
+                    model: claudeService.model,
                     timestamp: new Date().toISOString(),
                     sessionId: sessionId,
+                    provider: claudeService.provider,
                     capabilities: {
                         toolUse: claudeService.enableToolUse,
                         planning: claudeService.enablePlanning,
-                        memory: claudeService.enableMemory
+                        memory: claudeService.enableMemory,
+                        steering: true
                     }
                 });
 
             } catch (apiError) {
-                console.error('Claude API Error:', apiError);
+                console.error('API Error:', apiError);
 
                 // Fallback se l'API ha errori
                 res.json({
                     message: getFallbackResponse(message),
                     error: true,
-                    errorMessage: 'API Error - usando fallback',
+                    errorMessage: apiError.message || 'API Error - usando fallback',
                     timestamp: new Date().toISOString()
                 });
             }
@@ -288,7 +330,7 @@ app.post('/api/chat', async (req, res) => {
                 message: fallbackMessage,
                 mode: 'fallback',
                 timestamp: new Date().toISOString(),
-                hint: 'Configure ANTHROPIC_API_KEY to unlock full capabilities'
+                hint: 'Configure ANTHROPIC_API_KEY or AI_PROVIDER=litellm to unlock full capabilities'
             });
         }
 
@@ -312,9 +354,9 @@ app.post('/api/chat/stream', async (req, res) => {
             return res.status(400).json({ error: 'Message is required' });
         }
 
-        if (!claudeService || !process.env.ANTHROPIC_API_KEY) {
+        if (!isApiConfigured()) {
             return res.status(503).json({
-                error: 'Streaming requires Claude API configuration'
+                error: 'Streaming requires API configuration (ANTHROPIC_API_KEY or AI_PROVIDER=litellm)'
             });
         }
 
@@ -350,21 +392,23 @@ app.post('/api/chat/stream', async (req, res) => {
  * Get info su Mossab e le sue capacità
  */
 app.get('/api/mossab/info', (req, res) => {
-    const isApiConfigured = !!process.env.ANTHROPIC_API_KEY;
+    const apiReady = isApiConfigured();
 
     res.json({
         name: process.env.MOSSAB_NAME || 'Mossab',
         role: process.env.MOSSAB_ROLE || 'AI Developer & Programming Assistant',
         version: '2.0.0',
-        model: process.env.AI_MODEL || 'claude-sonnet-4-5-20250929',
-        apiConfigured: isApiConfigured,
+        model: claudeService?.model || process.env.AI_MODEL || 'claude-sonnet-4-5-20250929',
+        provider: claudeService?.provider || 'anthropic',
+        apiConfigured: apiReady,
         capabilities: {
             chat: true,
-            streaming: isApiConfigured,
-            toolUse: isApiConfigured && claudeService?.enableToolUse,
-            planning: isApiConfigured && claudeService?.enablePlanning,
-            memory: isApiConfigured && claudeService?.enableMemory,
-            reasoning: isApiConfigured,
+            streaming: apiReady,
+            steering: apiReady,
+            toolUse: apiReady && claudeService?.enableToolUse,
+            planning: apiReady && claudeService?.enablePlanning,
+            memory: apiReady && claudeService?.enableMemory,
+            reasoning: apiReady,
             codeGeneration: true
         },
         skills: [
@@ -379,8 +423,8 @@ app.get('/api/mossab/info', (req, res) => {
             'Problem Solving',
             'Code Review'
         ],
-        availableTools: isApiConfigured ? claudeService?.getTools().map(t => t.name) : [],
-        status: isApiConfigured ? 'fully_operational' : 'limited_mode'
+        availableTools: apiReady ? claudeService?.getTools().map(t => t.name) : [],
+        status: apiReady ? 'fully_operational' : 'limited_mode'
     });
 });
 
@@ -389,10 +433,12 @@ app.get('/api/mossab/info', (req, res) => {
  */
 app.get('/api/health', (req, res) => {
     const isHealthy = !!claudeService;
+    const apiReady = isApiConfigured();
 
     res.status(isHealthy ? 200 : 503).json({
         status: isHealthy ? 'healthy' : 'degraded',
-        mode: process.env.ANTHROPIC_API_KEY ? 'full' : 'fallback',
+        mode: apiReady ? 'full' : 'fallback',
+        provider: claudeService?.provider || 'none',
         uptime: process.uptime(),
         timestamp: new Date().toISOString(),
         sessions: sessions.size
@@ -1269,7 +1315,8 @@ app.get('/api/context/stats/:sessionId', async (req, res) => {
 
     try {
         // Ottieni conversation history dalla sessione
-        const conversationHistory = sessions.get(sessionId) || [];
+        const session = sessions.get(sessionId);
+        const conversationHistory = session?.history || [];
 
         // Ottieni stats dal ContextManager
         const stats = await claudeService.getContextStats(conversationHistory);
@@ -1299,8 +1346,9 @@ app.post('/api/context/summarize/:sessionId', async (req, res) => {
     }
 
     try {
-        // Ottieni conversation history
-        const conversationHistory = sessions.get(sessionId) || [];
+        // Ottieni conversation history dalla sessione
+        const session = sessions.get(sessionId);
+        const conversationHistory = session?.history || [];
 
         if (conversationHistory.length === 0) {
             return res.json({
@@ -1313,8 +1361,11 @@ app.post('/api/context/summarize/:sessionId', async (req, res) => {
         // Trigger summarization
         const optimized = await claudeService.triggerSummarization(conversationHistory);
 
-        // Aggiorna la sessione con history ottimizzata
-        sessions.set(sessionId, optimized);
+        // Aggiorna la sessione con history ottimizzata (mantieni struttura sessione)
+        if (session) {
+            session.history = optimized;
+            session.lastActive = new Date();
+        }
 
         // Calcola saving
         const originalTokens = await claudeService.contextManager.countTokens(conversationHistory);
@@ -1339,6 +1390,31 @@ app.post('/api/context/summarize/:sessionId', async (req, res) => {
         console.error('Error in manual summarization:', error);
         res.status(500).json({
             error: 'Summarization failed',
+            message: error.message
+        });
+    }
+});
+
+/**
+ * POST /api/context/reset
+ * Reset token tracking (chiamato quando si inizia una nuova chat)
+ */
+app.post('/api/context/reset', (req, res) => {
+    if (!claudeService || !claudeService.contextManager) {
+        return res.json({ success: true, message: 'No context to reset' });
+    }
+
+    try {
+        claudeService.contextManager.resetTrackedUsage();
+        console.log('📊 Token tracking reset');
+        res.json({
+            success: true,
+            message: 'Token tracking reset successfully'
+        });
+    } catch (error) {
+        console.error('Error resetting context:', error);
+        res.status(500).json({
+            error: 'Reset failed',
             message: error.message
         });
     }
@@ -4176,7 +4252,9 @@ setInterval(() => {
 
 // Start server
 app.listen(PORT, () => {
-    const apiConfigured = !!process.env.ANTHROPIC_API_KEY;
+    const apiReady = isApiConfigured();
+    const provider = claudeService?.provider || 'none';
+    const model = claudeService?.model || process.env.AI_MODEL || 'claude-sonnet-4-5-20250929';
 
     console.log(`
   ╔════════════════════════════════════════════════════════════╗
@@ -4186,15 +4264,15 @@ app.listen(PORT, () => {
   ║                                                            ║
   ║  Server: http://localhost:${PORT.toString().padEnd(39)} ║
   ║                                                            ║
-  ║  Mode: ${(apiConfigured ? '✅ FULL POWER' : '⚠️  LIMITED (no API key)').padEnd(48)} ║
-  ║                                                            ║
-  ${apiConfigured ? `║  Model: ${(process.env.AI_MODEL || 'claude-sonnet-4-5-20250929').padEnd(47)} ║` : '║  💡 Configure ANTHROPIC_API_KEY for full capabilities  ║'}
+  ║  Mode: ${(apiReady ? '✅ FULL POWER' : '⚠️  LIMITED (no API)').padEnd(48)} ║
+  ║  Provider: ${provider.padEnd(44)} ║
+  ║  Model: ${model.substring(0, 47).padEnd(47)} ║
   ║                                                            ║
   ║  Capabilities:                                             ║
-  ║    ${(apiConfigured ? '✅' : '❌')} Tool Use & MCP Integration                         ║
-  ║    ${(apiConfigured ? '✅' : '❌')} Advanced Planning & Reasoning                      ║
-  ║    ${(apiConfigured ? '✅' : '❌')} Conversation Memory                                ║
-  ║    ${(apiConfigured ? '✅' : '❌')} Real-time Streaming                                ║
+  ║    ${(apiReady ? '✅' : '❌')} Tool Use & MCP Integration                         ║
+  ║    ${(apiReady ? '✅' : '❌')} Advanced Planning & Reasoning                      ║
+  ║    ${(apiReady ? '✅' : '❌')} Conversation Memory                                ║
+  ║    ${(apiReady ? '✅' : '❌')} Real-time Streaming + Steering                     ║
   ║    ✅ Modern Web Interface                                 ║
   ║                                                            ║
   ║  Status: 🟢 Online and ready to code!                     ║
@@ -4202,17 +4280,21 @@ app.listen(PORT, () => {
   ╚════════════════════════════════════════════════════════════╝
   `);
 
-    if (!apiConfigured) {
+    if (!apiReady) {
         console.log(`
   ⚠️  CONFIGURATION NEEDED
   ───────────────────────────────────────────────────────────
   To unlock Mossab's full capabilities:
 
-  1. Get API key: https://console.anthropic.com/
-  2. Add to .env file: ANTHROPIC_API_KEY=your_key_here
-  3. Restart server
+  Option 1 - Anthropic Direct:
+    ANTHROPIC_API_KEY=your_key_here
 
-  Without API key, Mossab runs with basic fallback responses.
+  Option 2 - LiteLLM Proxy:
+    AI_PROVIDER=litellm
+    LITELLM_PROXY_URL=http://localhost:4000
+    LITELLM_MODEL=your_model
+
+  Without configuration, Mossab runs with basic fallback responses.
   ───────────────────────────────────────────────────────────
         `);
     }

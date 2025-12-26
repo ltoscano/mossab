@@ -4,7 +4,7 @@ const Anthropic = require('@anthropic-ai/sdk');
  * Context Manager per gestire il context window di Claude
  *
  * Features:
- * - Token counting in tempo reale
+ * - Token counting in tempo reale (supporta Anthropic e LiteLLM)
  * - Automatic summarization quando context si riempie
  * - Message prioritization (codice > decisioni > output ripetitivi)
  * - Smart context optimization
@@ -13,11 +13,27 @@ class ContextManager {
     constructor(model = 'claude-sonnet-4-5-20250929') {
         this.model = model;
         this.maxTokens = 200000;
-        this.warningThreshold = 0.85;  // 85% = 170K tokens
-        this.criticalThreshold = 0.95; // 95% = 190K tokens
-        this.anthropic = new Anthropic({
-            apiKey: process.env.ANTHROPIC_API_KEY
-        });
+        // PRODUZIONE: Soglie per summarization
+        this.warningThreshold = 0.85;  // 85% = 170K tokens → mostra bottone manuale
+        this.criticalThreshold = 0.95; // 95% = 190K tokens → summarization automatica
+
+        console.log(`📊 ContextManager initialized:`);
+        console.log(`   Warning (manual): ${this.warningThreshold * 100}% = ${this.maxTokens * this.warningThreshold / 1000}K tokens`);
+        console.log(`   Critical (auto): ${this.criticalThreshold * 100}% = ${this.maxTokens * this.criticalThreshold / 1000}K tokens`);
+
+        // Provider configuration
+        this.provider = process.env.AI_PROVIDER || 'anthropic';
+
+        // LiteLLM configuration
+        this.litellmProxyUrl = process.env.LITELLM_PROXY_URL || 'http://localhost:4000';
+        this.litellmApiKey = process.env.LITELLM_API_KEY || 'default';
+
+        // Anthropic client (only if not using LiteLLM or for fallback)
+        if (this.provider !== 'litellm' && process.env.ANTHROPIC_API_KEY) {
+            this.anthropic = new Anthropic({
+                apiKey: process.env.ANTHROPIC_API_KEY
+            });
+        }
 
         // Cache per evitare recount continuo
         this.tokenCache = new Map();
@@ -25,9 +41,14 @@ class ContextManager {
 
     /**
      * Conta i token in un array di messaggi
-     * Usa l'API di Anthropic per conteggio accurato
+     * Usa LiteLLM o Anthropic API, con fallback a stima locale
      */
     async countTokens(messages) {
+        // Handle empty/invalid messages
+        if (!messages || messages.length === 0) {
+            return 0;
+        }
+
         // Crea cache key
         const cacheKey = JSON.stringify(messages);
 
@@ -35,28 +56,184 @@ class ContextManager {
             return this.tokenCache.get(cacheKey);
         }
 
+        let count = 0;
+
         try {
-            // Usa l'API count_tokens di Anthropic
-            const response = await this.anthropic.messages.countTokens({
+            // Try provider-specific token counting
+            if (this.provider === 'litellm') {
+                count = await this.countTokensLiteLLM(messages);
+            } else {
+                count = await this.countTokensAnthropic(messages);
+            }
+        } catch (error) {
+            // Fallback to estimation on any error
+            count = this.estimateTokens(messages);
+        }
+
+        // Ensure we always have a valid count
+        if (!count || count <= 0) {
+            count = this.estimateTokens(messages);
+        }
+
+        this.cacheResult(cacheKey, count);
+        return count;
+    }
+
+    /**
+     * Count tokens using LiteLLM endpoints
+     * Tries multiple endpoints in order of accuracy
+     */
+    async countTokensLiteLLM(messages) {
+        // 1. Prima prova l'endpoint Anthropic-compatible /v1/messages/count_tokens
+        try {
+            const response = await fetch(`${this.litellmProxyUrl}/v1/messages/count_tokens`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.litellmApiKey}`
+                },
+                body: JSON.stringify({
+                    model: this.model,
+                    messages: messages
+                }),
+                signal: AbortSignal.timeout(5000)
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                // Anthropic format: { input_tokens: N }
+                const count = data.input_tokens || data.count || data.total_tokens;
+                if (count && count > 0) {
+                    console.log(`📊 Token count (v1/messages/count_tokens): ${count}`);
+                    return count;
+                }
+            }
+        } catch (error) {
+            // Endpoint non disponibile, prova il prossimo
+            console.log('⚠️ /v1/messages/count_tokens not available, trying fallback...');
+        }
+
+        // 2. Prova l'endpoint /utils/token_counter
+        try {
+            const response = await fetch(`${this.litellmProxyUrl}/utils/token_counter`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${this.litellmApiKey}`
+                },
+                body: JSON.stringify({
+                    model: this.model,
+                    messages: messages
+                }),
+                signal: AbortSignal.timeout(5000)
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                const count = data.count || data.total_tokens || data.input_tokens;
+                if (count && count > 0) {
+                    console.log(`📊 Token count (utils/token_counter): ${count}`);
+                    return count;
+                }
+            }
+        } catch (error) {
+            console.log('⚠️ /utils/token_counter not available');
+        }
+
+        // 3. Se abbiamo tracked usage da risposte precedenti, usalo
+        if (this.trackedUsage && this.trackedUsage.totalInputTokens > 0) {
+            console.log(`📊 Using tracked usage: ${this.trackedUsage.totalInputTokens} input tokens`);
+            return this.trackedUsage.totalInputTokens;
+        }
+
+        // 4. Ultima risorsa: stima basata su caratteri (non ideale ma meglio di 0)
+        console.log('⚠️ No LiteLLM token counting available, using character estimation');
+        return this.estimateTokens(messages);
+    }
+
+    /**
+     * Track actual token usage from API responses
+     * Call this after each API call to accumulate real usage data
+     */
+    trackUsage(usage) {
+        if (!this.trackedUsage) {
+            this.trackedUsage = {
+                totalInputTokens: 0,
+                totalOutputTokens: 0,
+                lastUpdated: null
+            };
+        }
+
+        if (usage) {
+            // OpenAI format: prompt_tokens, completion_tokens
+            // Anthropic format: input_tokens, output_tokens
+            const inputTokens = usage.prompt_tokens || usage.input_tokens || 0;
+            const outputTokens = usage.completion_tokens || usage.output_tokens || 0;
+
+            if (inputTokens > 0 || outputTokens > 0) {
+                this.trackedUsage.totalInputTokens += inputTokens;
+                this.trackedUsage.totalOutputTokens += outputTokens;
+                this.trackedUsage.lastUpdated = new Date();
+
+                console.log(`📊 Tracked usage: +${inputTokens} input, +${outputTokens} output (total: ${this.trackedUsage.totalInputTokens} input)`);
+            }
+        }
+    }
+
+    /**
+     * Get current tracked usage
+     */
+    getTrackedUsage() {
+        return this.trackedUsage || { totalInputTokens: 0, totalOutputTokens: 0 };
+    }
+
+    /**
+     * Reset tracked usage (e.g., on new chat)
+     */
+    resetTrackedUsage() {
+        this.trackedUsage = {
+            totalInputTokens: 0,
+            totalOutputTokens: 0,
+            lastUpdated: null
+        };
+    }
+
+    /**
+     * Count tokens using Anthropic beta.messages.countTokens API
+     */
+    async countTokensAnthropic(messages) {
+        const hasCountTokensAPI = this.anthropic?.beta?.messages?.countTokens;
+
+        if (!hasCountTokensAPI) {
+            return null;
+        }
+
+        try {
+            const response = await this.anthropic.beta.messages.countTokens({
                 model: this.model,
                 messages: messages,
                 system: this.systemPrompt || ''
             });
 
-            const count = response.input_tokens;
-            this.tokenCache.set(cacheKey, count);
-
-            // Limita cache a 100 entries
-            if (this.tokenCache.size > 100) {
-                const firstKey = this.tokenCache.keys().next().value;
-                this.tokenCache.delete(firstKey);
-            }
-
-            return count;
+            return response.input_tokens;
         } catch (error) {
-            console.error('Token counting error:', error);
-            // Fallback: stima approssimativa (4 chars = 1 token)
-            return this.estimateTokens(messages);
+            if (!error.message?.includes('not a function')) {
+                console.error('Anthropic token counting error:', error.message);
+            }
+            return null;
+        }
+    }
+
+    /**
+     * Cache result with size limit
+     */
+    cacheResult(cacheKey, count) {
+        this.tokenCache.set(cacheKey, count);
+
+        // Limita cache a 100 entries
+        if (this.tokenCache.size > 100) {
+            const firstKey = this.tokenCache.keys().next().value;
+            this.tokenCache.delete(firstKey);
         }
     }
 
@@ -161,7 +338,10 @@ class ContextManager {
      * Preserva messaggi ad alta priorità, riassume il resto
      */
     async summarizeConversation(messages, claudeService) {
-        console.log('🧠 Starting intelligent conversation summarization...');
+        console.log('');
+        console.log('╔══════════════════════════════════════════════════════════════╗');
+        console.log('║  🧠 SUMMARIZATION STARTED                                     ║');
+        console.log('╚══════════════════════════════════════════════════════════════╝');
 
         // 1. Dividi conversazione in chunks temporali
         const totalMessages = messages.length;
@@ -171,6 +351,12 @@ class ContextManager {
         const earlyMessages = messages.slice(0, earlyEnd);
         const midMessages = messages.slice(earlyEnd, midEnd);
         const recentMessages = messages.slice(midEnd);
+
+        console.log(`📋 Message Distribution:`);
+        console.log(`   Total messages: ${totalMessages}`);
+        console.log(`   Early (0-25%): ${earlyMessages.length} messages`);
+        console.log(`   Mid (25-75%): ${midMessages.length} messages`);
+        console.log(`   Recent (75-100%): ${recentMessages.length} messages [NEVER SUMMARIZED]`);
 
         // 2. Calcola priorità per early e mid messages
         const scoredEarly = earlyMessages.map(msg => ({
@@ -182,6 +368,11 @@ class ContextManager {
             message: msg,
             priority: this.calculateMessagePriority(msg)
         }));
+
+        // Log priority scores
+        console.log(`\n📊 Priority Scoring (threshold: 8):`);
+        console.log(`   Early messages scores: [${scoredEarly.map(s => s.priority).join(', ')}]`);
+        console.log(`   Mid messages scores: [${scoredMid.map(s => s.priority).join(', ')}]`);
 
         // 3. Identifica messaggi ad alta priorità da preservare
         const highPriorityThreshold = 8;
@@ -202,16 +393,30 @@ class ContextManager {
             .filter(item => item.priority < highPriorityThreshold)
             .map(item => item.message);
 
+        console.log(`\n🔍 Categorization:`);
+        console.log(`   Early - Preserved (priority≥8): ${preservedEarly.length} messages`);
+        console.log(`   Early - To summarize: ${toSummarizeEarly.length} messages`);
+        console.log(`   Mid - Preserved (priority≥8): ${preservedMid.length} messages`);
+        console.log(`   Mid - To summarize: ${toSummarizeMid.length} messages`);
+
         // 5. Genera summary per early messages
         let earlySummary = null;
         if (toSummarizeEarly.length > 0) {
+            console.log(`\n📝 Generating EARLY summary for ${toSummarizeEarly.length} messages...`);
             earlySummary = await this.generateSummary(toSummarizeEarly, 'early', claudeService);
+            console.log(`   ✅ Early summary generated (${earlySummary?.length || 0} chars)`);
+        } else {
+            console.log(`\n📝 No early messages to summarize`);
         }
 
         // 6. Genera summary per mid messages
         let midSummary = null;
         if (toSummarizeMid.length > 0) {
+            console.log(`📝 Generating MID summary for ${toSummarizeMid.length} messages...`);
             midSummary = await this.generateSummary(toSummarizeMid, 'mid', claudeService);
+            console.log(`   ✅ Mid summary generated (${midSummary?.length || 0} chars)`);
+        } else {
+            console.log(`📝 No mid messages to summarize`);
         }
 
         // 7. Ricostruisci conversation history ottimizzata
@@ -371,8 +576,19 @@ ${this.formatMessagesForSummary(messages)}
      */
     async getContextStats(messages, systemPrompt = '') {
         this.systemPrompt = systemPrompt;
-        const currentTokens = await this.countTokens(messages);
+
+        let currentTokens = 0;
+        let source = 'unknown';
+
+        // SEMPRE conta i token dei messaggi attuali (questo è il vero context window)
+        // trackedUsage è cumulativo e non rappresenta la dimensione della conversazione
+        currentTokens = await this.countTokens(messages);
+        source = 'counted';
+
         const percentage = (currentTokens / this.maxTokens) * 100;
+
+        const isWarning = percentage > (this.warningThreshold * 100);
+        const isCritical = percentage > (this.criticalThreshold * 100);
 
         return {
             current: currentTokens,
@@ -380,7 +596,9 @@ ${this.formatMessagesForSummary(messages)}
             percentage: percentage,
             remaining: this.maxTokens - currentTokens,
             status: this.getContextStatus(percentage),
-            shouldSummarize: percentage > (this.warningThreshold * 100)
+            showManualButton: isWarning && !isCritical,  // 85-95%: mostra bottone
+            shouldAutoSummarize: isCritical,              // >95%: auto summarization
+            source: source
         };
     }
 

@@ -26,12 +26,16 @@
                     </div>
                     <!-- TODO Progress Indicator -->
                     <div class="todo-indicator hidden" id="todoIndicator">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M9 11l3 3L22 4"></path>
-                            <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"></path>
-                        </svg>
-                        <span id="todoProgress">0/0</span>
-                        <span id="todoCurrentTask" class="todo-current"></span>
+                        <div class="todo-header" id="todoHeader">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M9 11l3 3L22 4"></path>
+                                <path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"></path>
+                            </svg>
+                            <span id="todoProgress">0/0</span>
+                            <span id="todoCurrentTask" class="todo-current"></span>
+                            <span class="todo-toggle-hint">(click to expand)</span>
+                        </div>
+                        <div class="todo-list hidden" id="todoList"></div>
                     </div>
                     <!-- Context Usage Indicator -->
                     <div class="context-usage" id="contextUsage">
@@ -224,9 +228,6 @@
                     <div class="model-info">
                         <span class="model-badge">Mossab v1.0</span>
                         <span class="model-indicator">● Ready</span>
-                    </div>
-                    <div class="token-counter" id="tokenCounter">
-                        <span>~0 tokens</span>
                     </div>
                 </div>
             </div>

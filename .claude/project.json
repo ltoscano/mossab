@@ -1,22 +1,22 @@
 {
-  "instructions": "This is a React 18 project using TypeScript and modern hooks.",
+  "instructions": "This is a Vue 3 project using Composition API and TypeScript.",
   "preferences": {
-    "framework": "React 18",
+    "framework": "Vue 3",
     "language": "TypeScript",
-    "componentStyle": "Functional components with hooks",
-    "stateManagement": "React Context + useReducer",
-    "testFramework": "Jest + React Testing Library",
-    "styling": "CSS Modules"
+    "componentStyle": "Composition API with <script setup>",
+    "stateManagement": "Pinia",
+    "testFramework": "Vitest",
+    "styling": "SCSS"
   },
   "standards": {
-    "naming": "PascalCase for components, camelCase for functions",
-    "fileStructure": "Feature-based folder structure",
-    "testing": "Write unit tests for all components",
-    "comments": "JSDoc comments for public APIs"
+    "naming": "PascalCase for components, kebab-case for files",
+    "fileStructure": "Feature-based with composables",
+    "testing": "Unit tests for composables and components",
+    "comments": "TSDoc for TypeScript code"
   },
   "metadata": {
-    "created": "2025-12-25T22:10:49.124Z",
-    "updated": "2025-12-25T22:10:49.124Z",
-    "template": "react"
+    "created": "2025-12-29T15:03:23.538Z",
+    "updated": "2025-12-29T15:03:24.542Z",
+    "template": "vue"
   }
 }

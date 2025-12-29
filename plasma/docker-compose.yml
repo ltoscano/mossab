@@ -1,0 +1,30 @@
+services:
+  plasma-ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: plasma-ui
+    ports:
+      - "3333:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - /app/.next
+    environment:
+      - NODE_ENV=development
+      - WATCHPACK_POLLING=true
+    restart: unless-stopped
+
+  # Production service (optional)
+  plasma-ui-prod:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: plasma-ui-prod
+    ports:
+      - "3001:3000"
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+    profiles:
+      - production
